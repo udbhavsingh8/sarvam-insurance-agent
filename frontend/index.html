@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Insurance Sales Voice Agent — Sarvam AI</title>
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #0f1117;
+      --surface:    #1a1d27;
+      --surface2:   #23273a;
+      --border:     #2e334a;
+      --accent:     #6c63ff;
+      --accent2:    #a78bfa;
+      --green:      #22c55e;
+      --red:        #ef4444;
+      --amber:      #f59e0b;
+      --text:       #e2e8f0;
+      --muted:      #94a3b8;
+      --radius:     12px;
+      --shadow:     0 4px 24px rgba(0,0,0,.45);
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px 48px;
+    }
+
+    /* ── Header ───────────────────────────────────────────────────── */
+    header {
+      width: 100%;
+      max-width: 860px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+    header .logo {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+    header h1 { font-size: 1.2rem; font-weight: 700; color: var(--text); }
+    header small { color: var(--muted); font-size: .75rem; }
+
+    /* ── Card ─────────────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      width: 100%; max-width: 860px;
+      box-shadow: var(--shadow);
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: .7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+
+    /* ── Upload area ──────────────────────────────────────────────── */
+    #drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 10px;
+      padding: 28px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+    }
+    #drop-zone:hover, #drop-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(108,99,255,.06);
+    }
+    #drop-zone .icon { font-size: 2rem; margin-bottom: 8px; }
+    #drop-zone p { color: var(--muted); font-size: .9rem; }
+    #drop-zone strong { color: var(--accent2); }
+    #file-input { display: none; }
+
+    /* ── Controls row ─────────────────────────────────────────────── */
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin-top: 14px;
+    }
+
+    /* ── Mode toggle ──────────────────────────────────────────────── */
+    .toggle-group {
+      display: flex;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .toggle-group button {
+      padding: 8px 18px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: .85rem;
+      font-weight: 600;
+      transition: background .15s, color .15s;
+    }
+    .toggle-group button.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    /* ── Language selector ────────────────────────────────────────── */
+    select {
+      padding: 8px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: .85rem;
+      cursor: pointer;
+      outline: none;
+    }
+    select:focus { border-color: var(--accent); }
+
+    /* ── Buttons ──────────────────────────────────────────────────── */
+    .btn {
+      padding: 9px 20px;
+      border-radius: 8px;
+      border: none;
+      font-size: .85rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity .15s, transform .1s;
+    }
+    .btn:active { transform: scale(.97); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-primary  { background: var(--accent);  color: #fff; }
+    .btn-success  { background: var(--green);   color: #fff; }
+    .btn-danger   { background: var(--red);     color: #fff; }
+    .btn-outline  {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .btn-outline:hover { border-color: var(--accent2); color: var(--accent2); }
+
+    /* ── Status badge ─────────────────────────────────────────────── */
+    #status {
+      font-size: .8rem;
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-weight: 600;
+      background: var(--surface2);
+      color: var(--muted);
+      margin-left: auto;
+    }
+    #status.ready    { background: rgba(34,197,94,.15);  color: var(--green); }
+    #status.loading  { background: rgba(245,158,11,.15); color: var(--amber); }
+    #status.error    { background: rgba(239,68,68,.15);  color: var(--red);   }
+
+    /* ── Chat window ──────────────────────────────────────────────── */
+    #chat-window {
+      height: 360px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 4px 2px;
+      scroll-behavior: smooth;
+    }
+    #chat-window::-webkit-scrollbar { width: 6px; }
+    #chat-window::-webkit-scrollbar-track { background: transparent; }
+    #chat-window::-webkit-scrollbar-thumb {
+      background: var(--border); border-radius: 3px;
+    }
+
+    .msg {
+      max-width: 80%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: .9rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: var(--accent);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .msg.agent {
+      align-self: flex-start;
+      background: var(--surface2);
+      color: var(--text);
+      border-bottom-left-radius: 4px;
+      border: 1px solid var(--border);
+    }
+    .msg.agent.streaming { opacity: .85; }
+    .msg .sender {
+      font-size: .7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      opacity: .65;
+      margin-bottom: 4px;
+    }
+
+    /* ── Input row ────────────────────────────────────────────────── */
+    .input-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 14px;
+      align-items: flex-end;
+    }
+    #text-input {
+      flex: 1;
+      padding: 10px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-size: .9rem;
+      resize: none;
+      outline: none;
+      min-height: 42px;
+      max-height: 120px;
+      line-height: 1.4;
+      font-family: inherit;
+    }
+    #text-input:focus { border-color: var(--accent); }
+
+    /* ── Mic button ───────────────────────────────────────────────── */
+    #mic-btn {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      border: none;
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 1.1rem;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      transition: background .15s, color .15s, box-shadow .15s;
+      flex-shrink: 0;
+    }
+    #mic-btn.recording {
+      background: var(--red);
+      color: #fff;
+      box-shadow: 0 0 0 4px rgba(239,68,68,.25);
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 4px rgba(239,68,68,.25); }
+      50%       { box-shadow: 0 0 0 8px rgba(239,68,68,.1);  }
+    }
+
+    /* ── Audio player ─────────────────────────────────────────────── */
+    #audio-player {
+      display: none;
+      width: 100%;
+      margin-top: 10px;
+      border-radius: 8px;
+      accent-color: var(--accent);
+    }
+
+    /* ── Waveform bars (recording indicator) ─────────────────────── */
+    #waveform {
+      display: none;
+      align-items: center;
+      gap: 3px;
+      height: 24px;
+      margin-top: 8px;
+    }
+    #waveform.active { display: flex; }
+    .bar {
+      width: 4px;
+      border-radius: 2px;
+      background: var(--red);
+      animation: wave 1s ease-in-out infinite;
+    }
+    .bar:nth-child(1) { animation-delay: 0s;    height: 8px;  }
+    .bar:nth-child(2) { animation-delay: .1s;   height: 16px; }
+    .bar:nth-child(3) { animation-delay: .2s;   height: 24px; }
+    .bar:nth-child(4) { animation-delay: .3s;   height: 16px; }
+    .bar:nth-child(5) { animation-delay: .4s;   height: 8px;  }
+    @keyframes wave {
+      0%, 100% { transform: scaleY(.4); }
+      50%       { transform: scaleY(1); }
+    }
+
+    /* ── Modal ────────────────────────────────────────────────────── */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.65);
+      backdrop-filter: blur(4px);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px 32px;
+      max-width: 600px;
+      width: 90%;
+      box-shadow: var(--shadow);
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .modal h2 {
+      font-size: 1.1rem;
+      margin-bottom: 16px;
+      color: var(--accent2);
+    }
+    .modal pre {
+      white-space: pre-wrap;
+      font-size: .875rem;
+      line-height: 1.6;
+      color: var(--text);
+      font-family: inherit;
+    }
+    .modal-footer {
+      margin-top: 20px;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    /* ── Footer note ──────────────────────────────────────────────── */
+    footer {
+      margin-top: 24px;
+      color: var(--muted);
+      font-size: .75rem;
+      text-align: center;
+    }
+    footer a { color: var(--accent2); text-decoration: none; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">🛡️</div>
+  <div>
+    <h1>Insurance Sales Voice Agent</h1>
+    <small>Powered by Sarvam AI · saaras:v3 · bulbul:v3 · sarvam-m</small>
+  </div>
+</header>
+
+<!-- ── Upload card ────────────────────────────────────────────────── -->
+<div class="card" id="upload-card">
+  <div class="card-title">1 — Upload Policy Document</div>
+
+  <div id="drop-zone" role="button" tabindex="0"
+       aria-label="Upload PDF insurance document">
+    <div class="icon">📄</div>
+    <p>Drag & drop your <strong>insurance PDF</strong> here<br>
+       or click to browse</p>
+  </div>
+  <input type="file" id="file-input" accept=".pdf" />
+
+  <div class="controls">
+    <div class="toggle-group" role="group" aria-label="Agent mode">
+      <button id="btn-pitch" class="active" onclick="setMode('pitch')">🎯 Pitch</button>
+      <button id="btn-qa"              onclick="setMode('qa')">💬 Q&amp;A</button>
+    </div>
+
+    <select id="lang-select" aria-label="TTS language">
+      <option value="en-IN">🇮🇳 English (en-IN)</option>
+      <option value="hi-IN">🇮🇳 Hindi (hi-IN)</option>
+      <option value="ta-IN">🇮🇳 Tamil (ta-IN)</option>
+      <option value="te-IN">🇮🇳 Telugu (te-IN)</option>
+    </select>
+
+    <button class="btn btn-primary" id="upload-btn"
+            onclick="uploadPDF()" disabled>Upload &amp; Start</button>
+
+    <span id="status">No document</span>
+  </div>
+</div>
+
+<!-- ── Chat card ──────────────────────────────────────────────────── -->
+<div class="card" id="chat-card" style="display:none">
+  <div class="card-title" style="display:flex;align-items:center;gap:8px">
+    <span id="mode-label">🎯 Pitch Mode</span>
+    <span style="flex:1"></span>
+    <div class="toggle-group" role="group" aria-label="Switch mode">
+      <button id="chat-btn-pitch" class="active"
+              onclick="switchMode('pitch')">🎯 Pitch</button>
+      <button id="chat-btn-qa"
+              onclick="switchMode('qa')">💬 Q&amp;A</button>
+    </div>
+    <select id="chat-lang-select" aria-label="TTS language"
+            onchange="syncLang(this.value)">
+      <option value="en-IN">🇮🇳 en-IN</option>
+      <option value="hi-IN">🇮🇳 hi-IN</option>
+      <option value="ta-IN">🇮🇳 ta-IN</option>
+      <option value="te-IN">🇮🇳 te-IN</option>
+    </select>
+    <button class="btn btn-outline" onclick="openSummary()">📋 Summary</button>
+  </div>
+
+  <div id="chat-window" role="log" aria-live="polite" aria-label="Conversation"></div>
+
+  <div id="waveform" aria-hidden="true">
+    <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+    <div class="bar"></div><div class="bar"></div>
+    <span style="margin-left:8px;font-size:.8rem;color:var(--red)">Recording…</span>
+  </div>
+
+  <audio id="audio-player" controls></audio>
+
+  <div class="input-row">
+    <textarea id="text-input" rows="1" placeholder="Type a message…"
+              aria-label="Message input"
+              onkeydown="handleKey(event)"
+              oninput="autoResize(this)"></textarea>
+    <button id="mic-btn" title="Hold to record voice"
+            onmousedown="startRecording()"  onmouseup="stopRecording()"
+            ontouchstart="startRecording()" ontouchend="stopRecording()">🎤</button>
+    <button class="btn btn-primary" id="send-btn" onclick="sendText()">Send</button>
+  </div>
+</div>
+
+<!-- ── Summary Modal ──────────────────────────────────────────────── -->
+<div class="modal-backdrop" id="summary-modal" role="dialog"
+     aria-modal="true" aria-labelledby="summary-title">
+  <div class="modal">
+    <h2 id="summary-title">📋 Session Summary</h2>
+    <pre id="summary-content">Generating…</pre>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeSummary()">Close</button>
+    </div>
+  </div>
+</div>
+
+<footer>
+  Built for <a href="https://sarvam.ai" target="_blank">Sarvam AI</a> technical assignment ·
+  <a href="/docs" target="_blank">API docs</a>
+</footer>
+
+<script>
+// ════════════════════════════════════════════════════════════════════
+// State
+// ════════════════════════════════════════════════════════════════════
+const API = '';          // '' = same origin; set to 'http://localhost:8000' for local dev
+let sessionId   = null;
+let agentMode   = 'pitch';
+let langCode    = 'en-IN';
+let mediaRec    = null;
+let audioChunks = [];
+let isSending   = false;
+
+// ════════════════════════════════════════════════════════════════════
+// Upload
+// ════════════════════════════════════════════════════════════════════
+const dropZone  = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const uploadBtn = document.getElementById('upload-btn');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('keydown', e => e.key === 'Enter' && fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFileSelect(f);
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) handleFileSelect(fileInput.files[0]);
+});
+
+function handleFileSelect(file) {
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    setStatus('error', 'Only PDF files are accepted');
+    return;
+  }
+  dropZone.querySelector('p').innerHTML =
+    `📄 <strong>${file.name}</strong> (${(file.size / 1024).toFixed(1)} KB)`;
+  uploadBtn.disabled = false;
+  uploadBtn._file = file;
+}
+
+function setMode(m) {
+  agentMode = m;
+  document.getElementById('btn-pitch').classList.toggle('active', m === 'pitch');
+  document.getElementById('btn-qa').classList.toggle('active', m === 'qa');
+}
+
+async function uploadPDF() {
+  const file = uploadBtn._file;
+  if (!file) return;
+
+  setStatus('loading', 'Ingesting…');
+  uploadBtn.disabled = true;
+
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('mode', agentMode);
+
+  try {
+    const res = await fetch(`${API}/upload`, { method: 'POST', body: fd });
+    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    const data = await res.json();
+    sessionId = data.session_id;
+    setStatus('ready', `${data.chunk_count} chunks indexed`);
+    showChatUI();
+
+    if (agentMode === 'pitch') {
+      await openPitch();
+    } else {
+      appendMsg('agent', 'Document loaded. Ask me anything about this insurance product!');
+    }
+  } catch (err) {
+    setStatus('error', err.message);
+    uploadBtn.disabled = false;
+  }
+}
+
+function setStatus(cls, txt) {
+  const el = document.getElementById('status');
+  el.className = cls;
+  el.textContent = txt;
+}
+
+function showChatUI() {
+  document.getElementById('chat-card').style.display = 'block';
+  document.getElementById('chat-btn-pitch').classList.toggle('active', agentMode === 'pitch');
+  document.getElementById('chat-btn-qa').classList.toggle('active', agentMode === 'qa');
+  document.getElementById('mode-label').textContent =
+    agentMode === 'pitch' ? '🎯 Pitch Mode' : '💬 Q&A Mode';
+  document.getElementById('chat-lang-select').value = langCode;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Mode / language switching (mid-session)
+// ════════════════════════════════════════════════════════════════════
+async function switchMode(m) {
+  if (!sessionId || m === agentMode) return;
+  const fd = new FormData();
+  fd.append('session_id', sessionId);
+  fd.append('mode', m);
+  await fetch(`${API}/mode`, { method: 'POST', body: fd });
+  agentMode = m;
+  document.getElementById('chat-btn-pitch').classList.toggle('active', m === 'pitch');
+  document.getElementById('chat-btn-qa').classList.toggle('active', m === 'qa');
+  document.getElementById('mode-label').textContent =
+    m === 'pitch' ? '🎯 Pitch Mode' : '💬 Q&A Mode';
+  appendMsg('agent', m === 'pitch'
+    ? 'Switched to Pitch mode. Let me walk you through the key benefits…'
+    : 'Switched to Q&A mode. Go ahead and ask me anything about the policy!');
+}
+
+function syncLang(v) { langCode = v; }
+
+// ════════════════════════════════════════════════════════════════════
+// Chat — text
+// ════════════════════════════════════════════════════════════════════
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+async function sendText() {
+  const input = document.getElementById('text-input');
+  const msg = input.value.trim();
+  if (!msg || !sessionId || isSending) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+  appendMsg('user', msg);
+  await sendMessage(msg);
+}
+
+async function openPitch() {
+  const fd = new FormData();
+  fd.append('session_id', sessionId);
+  fd.append('message', '');
+  fd.append('open_pitch', 'true');
+  fd.append('stream', 'false');
+
+  const res = await fetch(`${API}/chat`, { method: 'POST', body: fd });
+  if (!res.ok) return;
+  const data = await res.json();
+  appendMsg('agent', data.reply);
+  await speakText(data.reply);
+}
+
+async function sendMessage(userText) {
+  if (isSending) return;
+  isSending = true;
+  document.getElementById('send-btn').disabled = true;
+
+  const fd = new FormData();
+  fd.append('session_id', sessionId);
+  fd.append('message', userText);
+  fd.append('stream', 'true');
+
+  const agentBubble = appendMsg('agent', '', true);
+  let fullReply = '';
+
+  try {
+    const res = await fetch(`${API}/chat`, { method: 'POST', body: fd });
+    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const lines = dec.decode(value).split('\n');
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const token = line.slice(6);
+        if (token === '[DONE]') break;
+        fullReply += token;
+        agentBubble.querySelector('.body').textContent = fullReply;
+        scrollChat();
+      }
+    }
+    agentBubble.classList.remove('streaming');
+    if (fullReply) await speakText(fullReply);
+  } catch (err) {
+    agentBubble.querySelector('.body').textContent = `⚠️ ${err.message}`;
+  } finally {
+    isSending = false;
+    document.getElementById('send-btn').disabled = false;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// TTS — streaming audio playback
+// ════════════════════════════════════════════════════════════════════
+async function speakText(text) {
+  if (!text) return;
+  const url = `${API}/speak?text=${encodeURIComponent(text)}&language_code=${langCode}`;
+  const player = document.getElementById('audio-player');
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return;                // TTS errors are non-fatal
+    const blob = await res.blob();
+    const objUrl = URL.createObjectURL(blob);
+    player.src = objUrl;
+    player.style.display = 'block';
+    await player.play().catch(() => {});  // autoplay may be blocked
+  } catch (_) {}
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Voice recording — STT
+// ════════════════════════════════════════════════════════════════════
+async function startRecording() {
+  if (mediaRec) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRec = new MediaRecorder(stream);
+    audioChunks = [];
+    mediaRec.ondataavailable = e => audioChunks.push(e.data);
+    mediaRec.start();
+    document.getElementById('mic-btn').classList.add('recording');
+    document.getElementById('waveform').classList.add('active');
+  } catch (err) {
+    appendMsg('agent', `⚠️ Microphone access denied: ${err.message}`);
+  }
+}
+
+async function stopRecording() {
+  if (!mediaRec) return;
+  mediaRec.stop();
+  mediaRec.stream.getTracks().forEach(t => t.stop());
+
+  await new Promise(r => (mediaRec.onstop = r));
+  mediaRec = null;
+  document.getElementById('mic-btn').classList.remove('recording');
+  document.getElementById('waveform').classList.remove('active');
+
+  const blob = new Blob(audioChunks, { type: 'audio/webm' });
+  audioChunks = [];
+  if (blob.size < 1000) return;    // too short — ignore
+
+  await transcribeAndSend(blob);
+}
+
+async function transcribeAndSend(blob) {
+  setStatus('loading', 'Transcribing…');
+  const fd = new FormData();
+  fd.append('audio', blob, 'recording.webm');
+  fd.append('language_code', langCode === 'en-IN' ? 'en-IN' : 'hi-IN');
+
+  try {
+    const res = await fetch(`${API}/transcribe`, { method: 'POST', body: fd });
+    if (!res.ok) throw new Error((await res.json()).detail);
+    const { transcript } = await res.json();
+    setStatus('ready', 'Ready');
+    if (!transcript.trim()) return;
+    document.getElementById('text-input').value = transcript;
+    appendMsg('user', transcript);
+    await sendMessage(transcript);
+  } catch (err) {
+    setStatus('error', `STT: ${err.message}`);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Summary modal
+// ════════════════════════════════════════════════════════════════════
+async function openSummary() {
+  document.getElementById('summary-content').textContent = 'Generating…';
+  document.getElementById('summary-modal').classList.add('open');
+
+  const fd = new FormData();
+  fd.append('session_id', sessionId);
+  try {
+    const res = await fetch(`${API}/summary`, { method: 'POST', body: fd });
+    const data = await res.json();
+    document.getElementById('summary-content').textContent =
+      data.summary || 'No summary available.';
+  } catch (err) {
+    document.getElementById('summary-content').textContent = `Error: ${err.message}`;
+  }
+}
+
+function closeSummary() {
+  document.getElementById('summary-modal').classList.remove('open');
+}
+
+// Close modal on backdrop click
+document.getElementById('summary-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeSummary();
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Chat DOM helpers
+// ════════════════════════════════════════════════════════════════════
+function appendMsg(role, text, streaming = false) {
+  const win = document.getElementById('chat-window');
+  const div = document.createElement('div');
+  div.className = `msg ${role}${streaming ? ' streaming' : ''}`;
+  div.innerHTML = `
+    <div class="sender">${role === 'user' ? '🧑 You' : '🤖 Agent'}</div>
+    <div class="body">${escHtml(text)}</div>`;
+  // For streaming bubbles we update .body directly without re-escaping
+  if (streaming) div.querySelector('.body').textContent = text;
+  win.appendChild(div);
+  scrollChat();
+  return div;
+}
+
+function scrollChat() {
+  const win = document.getElementById('chat-window');
+  win.scrollTop = win.scrollHeight;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+</body>
+</html>
