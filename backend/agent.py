@@ -1,237 +1,190 @@
 """
-agent.py — LLM logic for the Insurance Sales Voice Agent.
+AgentSession — one session of the Insurance Sales Voice Agent.
 
-Modes
------
-  pitch  Agent proactively pitches the insurance product from the document.
-  qa     Agent answers only questions that can be answered from the document.
-
-Both modes use dynamic RAG: on every turn the user query is embedded,
-top-k chunks are retrieved from FAISS, and injected into the system prompt.
+Wires together: LLMClient, DocumentStore, SessionMemory, CharacterRegistry,
+ConversationAnalyzer, and metrics logging.
 """
 
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass, field
+import time
+import uuid
 from typing import Iterator
 
-from sarvamai import SarvamAI
+from characters import CHARACTERS, SUPPORTED_LANGUAGES
+from conversation_analyzer import apply_analysis, parse_meta_tag
+from errors import LLMError
+from llm import LLMClient
+from memory import SessionMemory
+from metrics import TurnMetrics, log_session, log_turn
+from prompts import ADVISOR_RULES, MAIN_SYSTEM_PROMPT, META_TAG_INSTRUCTION, STAGE_INTENTS, VOICE_RULES, language_display_name
+from rag import DocumentStore
 
-from rag import RAGRetriever
-
-# ------------------------------------------------------------------ #
-# Constants
-# ------------------------------------------------------------------ #
-
-LLM_MODEL = "sarvam-m"   # sarvam-105b / 128 K context
-MAX_TOKENS = 512
-TEMPERATURE = 0.7
-
-# Internal RAG trigger for the opening pitch (no real user query yet)
-_PITCH_RAG_SEED = "insurance policy overview benefits coverage premium exclusions"
-
-# ------------------------------------------------------------------ #
-# Prompt templates
-# ------------------------------------------------------------------ #
-
-_PITCH_SYSTEM = """\
-You are an expert insurance sales agent for an Indian insurance company.
-Your job is to proactively pitch the product described in the document excerpts below
-to a potential customer over a voice call.
-
-DOCUMENT EXCERPTS:
-{context}
-
-RULES:
-1. Highlight the most compelling benefits, coverage, and value propositions from the excerpts.
-2. After presenting 2-3 key points, invite the customer to ask questions or share concerns.
-3. Handle objections calmly — always support your response with specific details from the excerpts.
-4. If a question cannot be answered from the document, say:
-   "I don't have that specific detail in front of me, but I can find out for you."
-5. Never fabricate premium amounts, coverage limits, or policy terms.
-6. Keep every response concise — 2-4 sentences — suitable for voice delivery.
-7. Use a warm, professional, conversational tone appropriate for India.\
-"""
-
-_QA_SYSTEM = """\
-You are a knowledgeable insurance product specialist answering customer questions over a voice call.
-Answer strictly from the document excerpts below.
-
-DOCUMENT EXCERPTS:
-{context}
-
-RULES:
-1. Answer ONLY from the excerpts provided above.
-2. If the answer is not in the excerpts, explicitly say:
-   "That information is not available in the current product document."
-3. Be precise — quote or closely paraphrase the document when relevant.
-4. Keep every response concise — 2-4 sentences — suitable for voice delivery.
-5. Never guess or fabricate policy details.
-6. Use a warm, professional, conversational tone appropriate for India.\
-"""
-
-_SUMMARY_TEMPLATE = """\
-Below is a conversation between an insurance sales agent and a customer.
-Produce a concise structured summary.
-
-CONVERSATION:
-{conversation}
-
-Format your summary as:
-1. Product discussed — name or type of insurance product
-2. Key points covered — bullet list of main features/benefits discussed
-3. Customer questions & concerns — what the customer asked or objected to
-4. Outcome — apparent interest level and any agreed next steps
-
-Be factual and concise.\
-"""
+_FALLBACK = "I'm having a connection issue right now. Could you give me a moment and try again?"
 
 
-# ------------------------------------------------------------------ #
-# AgentSession
-# ------------------------------------------------------------------ #
-
-
-@dataclass
 class AgentSession:
-    """
-    Manages a single customer conversation session.
+    def __init__(
+        self,
+        store: DocumentStore,
+        character_id: str = "arjun",
+        session_id: str | None = None,
+    ) -> None:
+        self.store = store
+        self.session_id = session_id or str(uuid.uuid4())
+        self.character = CHARACTERS.get(character_id, CHARACTERS["arjun"])
+        self.memory = SessionMemory(character_id=self.character["id"])
+        self._llm = LLMClient()
+        self._start_time = time.time()
 
-    Parameters
-    ----------
-    retriever : RAGRetriever
-        Loaded FAISS retriever for the uploaded insurance document.
-    mode : str
-        Starting mode — ``"pitch"`` or ``"qa"``.
-    """
+    # ── Public interface ───────────────────────────────────────────────
 
-    retriever: RAGRetriever
-    mode: str = "pitch"
-    history: list[dict] = field(default_factory=list)
-    _sarvam: SarvamAI | None = field(default=None, init=False, repr=False)
+    def opener(self) -> str:
+        """Return the character's opening line (no LLM call needed)."""
+        return self.character["opener"]
 
-    # ------------------------------------------------------------------ #
-    # Private helpers
-    # ------------------------------------------------------------------ #
-
-    def _get_sarvam(self) -> SarvamAI:
-        if self._sarvam is None:
-            key = os.getenv("SARVAM_API_KEY")
-            if not key:
-                raise RuntimeError("SARVAM_API_KEY is not set")
-            self._sarvam = SarvamAI(api_subscription_key=key)
-        return self._sarvam
-
-    def _system_prompt(self, rag_query: str) -> str:
-        chunks = self.retriever.retrieve(rag_query)
-        context = RAGRetriever.format_context(chunks)
-        template = _PITCH_SYSTEM if self.mode == "pitch" else _QA_SYSTEM
-        return template.format(context=context)
-
-    def _build_messages(self, system: str) -> list[dict]:
-        return [{"role": "system", "content": system}] + self.history
-
-    # ------------------------------------------------------------------ #
-    # Public API
-    # ------------------------------------------------------------------ #
-
-    def set_mode(self, mode: str) -> None:
-        """Switch between ``"pitch"`` and ``"qa"`` modes."""
-        if mode not in ("pitch", "qa"):
-            raise ValueError(f"Unknown mode '{mode}'. Choose 'pitch' or 'qa'.")
-        self.mode = mode
-
-    def open_pitch(self) -> str:
+    def chat(self, user_text: str) -> str:
         """
-        Generate the agent's opening pitch (no prior user message).
-        Use this to kick off a Pitch-mode session.
+        Process one user turn. Returns clean agent response text.
+        Updates session memory with language, stage, and intelligence signals.
+        On LLM failure returns a fallback line and logs the error.
         """
-        system = self._system_prompt(_PITCH_RAG_SEED)
-        messages = self._build_messages(system) + [
-            {"role": "user", "content": "Please introduce me to this insurance product."}
-        ]
-        resp = self._get_sarvam().chat.completions(
-            messages=messages,
-            model=LLM_MODEL,
-            temperature=TEMPERATURE,
-            max_tokens=MAX_TOKENS,
+        t0 = time.time()
+        llm_error = False
+        error_detail: str | None = None
+
+        messages = self._build_messages(user_text)
+        t_llm_start = time.time()
+        try:
+            raw = self._llm.complete(messages)
+        except LLMError as exc:
+            raw = _FALLBACK
+            llm_error = True
+            error_detail = str(exc)
+        llm_ms = int((time.time() - t_llm_start) * 1000)
+
+        clean, analysis = parse_meta_tag(raw)
+
+        self.memory.turn_count += 1
+        self.memory.log_turn("user", user_text)
+        self.memory.log_turn("assistant", clean)
+
+        if analysis and not llm_error:
+            apply_analysis(self.memory, analysis, user_text)
+
+        log_turn(TurnMetrics(
+            session_id=self.session_id,
+            turn_id=self.memory.turn_count,
+            timestamp=t0,
+            stt_latency_ms=0,
+            llm_latency_ms=llm_ms,
+            tts_latency_ms=0,
+            transcript_chars=len(user_text),
+            response_chars=len(clean),
+            detected_language=self.memory.detected_language,
+            stage=self.memory.stage,
+            character=self.character["id"],
+            llm_error=llm_error,
+            error_detail=error_detail,
+        ))
+
+        return clean
+
+    def chat_stream(self, user_text: str) -> Iterator[str]:
+        """
+        Stream agent response tokens. Caller must collect the full text
+        to update history — call record_turn() after streaming is done.
+        """
+        messages = self._build_messages(user_text)
+        self._pending_user_text = user_text
+        self._stream_parts: list[str] = []
+
+        for token in self._llm.stream(messages):
+            self._stream_parts.append(token)
+            yield token
+
+    def record_turn(
+        self,
+        llm_ms: int = 0,
+        stt_ms: int = 0,
+        tts_ms: int = 0,
+        llm_error: bool = False,
+        error_detail: str | None = None,
+    ) -> None:
+        """
+        Called after a streaming turn completes.
+        Assembles full response, parses META tag, updates memory.
+        """
+        raw = "".join(self._stream_parts) if self._stream_parts else _FALLBACK
+        clean, analysis = parse_meta_tag(raw)
+
+        user_text = getattr(self, "_pending_user_text", "")
+        self.memory.turn_count += 1
+        self.memory.log_turn("user", user_text)
+        self.memory.log_turn("assistant", clean)
+
+        if analysis and not llm_error:
+            apply_analysis(self.memory, analysis, user_text)
+
+        log_turn(TurnMetrics(
+            session_id=self.session_id,
+            turn_id=self.memory.turn_count,
+            timestamp=time.time(),
+            stt_latency_ms=stt_ms,
+            llm_latency_ms=llm_ms,
+            tts_latency_ms=tts_ms,
+            transcript_chars=len(user_text),
+            response_chars=len(clean),
+            detected_language=self.memory.detected_language,
+            stage=self.memory.stage,
+            character=self.character["id"],
+            llm_error=llm_error,
+            error_detail=error_detail,
+        ))
+
+        self._stream_parts = []
+        self._pending_user_text = ""
+
+    def update_language(self, language_code: str, probability: float) -> None:
+        """Called after STT to propagate detected language into memory."""
+        self.memory.update_language(language_code, probability)
+
+    def end_session(self) -> None:
+        duration = time.time() - self._start_time
+        log_session(self.session_id, self.memory, duration)
+
+    @property
+    def speaker(self) -> str:
+        return self.character["voice"]
+
+    @property
+    def language(self) -> str:
+        return self.memory.detected_language
+
+    # ── Internal ───────────────────────────────────────────────────────
+
+    def _build_messages(self, user_text: str) -> list[dict]:
+        system = MAIN_SYSTEM_PROMPT.format(
+            name=self.character["name"],
+            persona=self.character["persona"],
+            style_guide=self.character["style_guide"],
+            language_name=language_display_name(self.memory.detected_language),
+            document_context=self.store.get_context(user_text),
+            memory_summary=self.memory.memory_summary(),
+            stage=self.memory.stage,
+            stage_intent=STAGE_INTENTS.get(self.memory.stage, ""),
+            voice_rules=VOICE_RULES,
+            advisor_rules=ADVISOR_RULES,
+            meta_tag_instruction=META_TAG_INSTRUCTION,
         )
-        reply: str = resp.choices[0].message.content or ""
-        self.history.append({"role": "assistant", "content": reply})
-        return reply
 
-    def chat(self, user_message: str) -> str:
-        """
-        Single-turn exchange — returns the full assistant reply.
-        Suitable for non-streaming use (text / REST response).
-        """
-        self.history.append({"role": "user", "content": user_message})
-        system = self._system_prompt(user_message)
-        messages = self._build_messages(system)
+        # Build history from turn_log (user/assistant pairs only)
+        history: list[dict] = []
+        for entry in self.memory.turn_log:
+            if entry["role"] in ("user", "assistant"):
+                history.append({"role": entry["role"], "content": entry["text"]})
 
-        resp = self._get_sarvam().chat.completions(
-            messages=messages,
-            model=LLM_MODEL,
-            temperature=TEMPERATURE,
-            max_tokens=MAX_TOKENS,
-        )
-        reply: str = resp.choices[0].message.content or ""
-        self.history.append({"role": "assistant", "content": reply})
-        return reply
+        # Current user turn
+        history.append({"role": "user", "content": user_text})
 
-    def chat_stream(self, user_message: str) -> Iterator[str]:
-        """
-        Streaming version — yields text tokens as they arrive from the LLM.
-        Full reply is appended to history once streaming is complete.
-        Used by the FastAPI ``/chat`` SSE endpoint to feed TTS chunk-by-chunk.
-        """
-        self.history.append({"role": "user", "content": user_message})
-        system = self._system_prompt(user_message)
-        messages = self._build_messages(system)
-
-        stream = self._get_sarvam().chat.completions(
-            messages=messages,
-            model=LLM_MODEL,
-            temperature=TEMPERATURE,
-            max_tokens=MAX_TOKENS,
-            stream=True,
-        )
-
-        full_reply: list[str] = []
-        for chunk in stream:
-            delta: str | None = chunk.choices[0].delta.content
-            if delta:
-                full_reply.append(delta)
-                yield delta
-
-        self.history.append({"role": "assistant", "content": "".join(full_reply)})
-
-    def summarize(self) -> str:
-        """
-        Generate a structured end-of-session summary from conversation history.
-        Returns plain text — used by the ``/summary`` endpoint.
-        """
-        if not self.history:
-            return "No conversation to summarize."
-
-        conversation_text = "\n".join(
-            f"{msg['role'].upper()}: {msg['content']}" for msg in self.history
-        )
-        messages = [
-            {
-                "role": "user",
-                "content": _SUMMARY_TEMPLATE.format(conversation=conversation_text),
-            }
-        ]
-        resp = self._get_sarvam().chat.completions(
-            messages=messages,
-            model=LLM_MODEL,
-            temperature=0.3,
-            max_tokens=600,
-        )
-        return resp.choices[0].message.content or "Summary unavailable."
-
-    def reset(self) -> None:
-        """Clear conversation history (keep mode and retriever)."""
-        self.history.clear()
+        return [{"role": "system", "content": system}] + history

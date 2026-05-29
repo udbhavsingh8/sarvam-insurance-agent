@@ -1,12 +1,4 @@
-"""
-tts.py — Text-to-Speech using Sarvam bulbul:v3.
-
-Supports 4 languages:  en-IN  hi-IN  ta-IN  te-IN
-
-Provides two entry points:
-  synthesize()        → bytes  (full WAV, for short utterances)
-  synthesize_stream() → Iterator[bytes]  (chunked stream, for FastAPI StreamingResponse)
-"""
+"""Text-to-Speech using Sarvam bulbul:v3."""
 
 import base64
 import os
@@ -14,19 +6,31 @@ from typing import Iterator
 
 from sarvamai import SarvamAI
 
-TTS_MODEL = "bulbul:v3"
-SAMPLE_RATE = 22050   # Hz — good quality for voice; 8 000 is telephone grade
+from errors import TTSError, retry_call
 
-# One natural-sounding speaker per supported language.
-# These are all from the bulbul:v3 speaker catalogue.
-_SPEAKERS: dict[str, str] = {
-    "en-IN": "anushka",   # clear Indian-English female voice
-    "hi-IN": "manisha",   # natural Hindi female voice
-    "ta-IN": "arya",      # Tamil female voice
-    "te-IN": "vidya",     # Telugu female voice
+TTS_MODEL = "bulbul:v3"
+SAMPLE_RATE = 22050
+
+# bulbul:v3 rejects inputs over ~500 chars; stay well under that.
+MAX_TTS_CHARS = 400
+
+# All 10 languages confirmed working with bulbul:v3.
+# Any speaker works with any language — speaker identity is consistent across languages.
+# Default speakers used when no character-specific speaker is passed.
+_DEFAULT_SPEAKERS: dict[str, str] = {
+    "en-IN": "anushka",
+    "hi-IN": "anushka",
+    "ta-IN": "anushka",
+    "te-IN": "anushka",
+    "kn-IN": "anushka",
+    "ml-IN": "anushka",
+    "mr-IN": "anushka",
+    "bn-IN": "anushka",
+    "gu-IN": "anushka",
+    "pa-IN": "anushka",
 }
 
-SUPPORTED_LANGUAGES = list(_SPEAKERS.keys())
+SUPPORTED_LANGUAGES = list(_DEFAULT_SPEAKERS.keys())
 
 
 def _get_client() -> SarvamAI:
@@ -36,44 +40,66 @@ def _get_client() -> SarvamAI:
     return SarvamAI(api_subscription_key=key)
 
 
-def _speaker(language_code: str) -> str:
-    return _SPEAKERS.get(language_code, "anushka")
+def _truncate_for_tts(text: str) -> str:
+    """Trim to MAX_TTS_CHARS at the last sentence boundary, falling back to hard cut."""
+    if len(text) <= MAX_TTS_CHARS:
+        return text
+    for sep in (". ", "? ", "! "):
+        idx = text.rfind(sep, 0, MAX_TTS_CHARS)
+        if idx > 0:
+            return text[: idx + 1]
+    return text[:MAX_TTS_CHARS]
 
 
-def synthesize(text: str, language_code: str = "en-IN") -> bytes:
-    """
-    Non-streaming TTS.  Returns the full WAV audio as raw bytes.
-
-    Suitable for short responses or fallback when streaming isn't needed.
-    """
+def synthesize(text: str, language_code: str = "en-IN", speaker: str | None = None) -> bytes:
+    """Non-streaming TTS. Returns full WAV audio as raw bytes."""
+    if language_code not in SUPPORTED_LANGUAGES:
+        language_code = "en-IN"
+    spk = speaker or _DEFAULT_SPEAKERS[language_code]
     client = _get_client()
-    response = client.text_to_speech.convert(
-        text=text,
-        target_language_code=language_code,
-        speaker=_speaker(language_code),
-        model=TTS_MODEL,
-        output_audio_codec="wav",
-        speech_sample_rate=SAMPLE_RATE,
-        enable_preprocessing=True,
-    )
-    # audios[0] is a base64-encoded WAV string
-    return base64.b64decode(response.audios[0])
+    text = _truncate_for_tts(text)
+
+    def _call() -> bytes:
+        try:
+            response = client.text_to_speech.convert(
+                text=text,
+                target_language_code=language_code,
+                speaker=spk,
+                model=TTS_MODEL,
+                output_audio_codec="wav",
+                speech_sample_rate=SAMPLE_RATE,
+                enable_preprocessing=True,
+            )
+            return base64.b64decode(response.audios[0])
+        except TTSError:
+            raise
+        except Exception as exc:
+            raise TTSError(str(exc)) from exc
+
+    return retry_call(_call, label="TTS")
 
 
-def synthesize_stream(text: str, language_code: str = "en-IN") -> Iterator[bytes]:
-    """
-    Streaming TTS.  Yields raw audio byte chunks as they arrive from the API.
-
-    Pipe directly into a FastAPI ``StreamingResponse`` so the browser can
-    start playing audio before the full synthesis is complete.
-    """
+def synthesize_stream(
+    text: str, language_code: str = "en-IN", speaker: str | None = None
+) -> Iterator[bytes]:
+    """Streaming TTS. Yields raw audio byte chunks."""
+    if language_code not in SUPPORTED_LANGUAGES:
+        language_code = "en-IN"
+    spk = speaker or _DEFAULT_SPEAKERS[language_code]
     client = _get_client()
-    yield from client.text_to_speech.convert_stream(
-        text=text,
-        target_language_code=language_code,
-        speaker=_speaker(language_code),
-        model=TTS_MODEL,
-        output_audio_codec="wav",
-        speech_sample_rate=SAMPLE_RATE,
-        enable_preprocessing=True,
-    )
+    text = _truncate_for_tts(text)
+
+    try:
+        yield from client.text_to_speech.convert_stream(
+            text=text,
+            target_language_code=language_code,
+            speaker=spk,
+            model=TTS_MODEL,
+            output_audio_codec="wav",
+            speech_sample_rate=SAMPLE_RATE,
+            enable_preprocessing=True,
+        )
+    except TTSError:
+        raise
+    except Exception as exc:
+        raise TTSError(str(exc)) from exc

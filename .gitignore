@@ -28,3 +28,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Runtime logs (generated at runtime, not source)
+logs/
