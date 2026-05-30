@@ -178,9 +178,11 @@ class AgentSession:
             meta_tag_instruction=META_TAG_INSTRUCTION,
         )
 
-        # Build history from turn_log (user/assistant pairs only)
+        # Build history from turn_log (user/assistant pairs only), capped to last 20 turns
+        MAX_HISTORY_TURNS = 20
+        relevant_log = self.memory.turn_log[-(MAX_HISTORY_TURNS * 2):]
         history: list[dict] = []
-        for entry in self.memory.turn_log:
+        for entry in relevant_log:
             if entry["role"] in ("user", "assistant"):
                 history.append({"role": entry["role"], "content": entry["text"]})
 
