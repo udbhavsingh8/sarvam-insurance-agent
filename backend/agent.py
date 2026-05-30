@@ -93,43 +93,26 @@ class AgentSession:
 
     def generate_opener(self) -> str:
         """
-        Generate a contextual opening line using the product document metadata.
-        Makes one lightweight LLM call — result is not cached (session is new each time).
-        Falls back to a document-aware template if the LLM call fails.
+        Build a clean opening line directly from document metadata — no LLM call.
+        Eliminates placeholder hallucination and removes one full API round-trip.
         """
         meta = self.store.metadata
         plan_name = meta.get("plan_name", "this plan")
         company_name = meta.get("company_name", "")
-        one_line_pitch = meta.get("one_line_pitch", "it provides financial protection for you and your family")
-        language_name = language_display_name(self.memory.detected_language)
+        one_line_pitch = meta.get("one_line_pitch", "provides financial protection for your family")
+        name = self.character["name"]
 
-        prompt_text = OPENER_PROMPT.format(
-            name=self.character["name"],
-            persona=self.character["persona"],
-            style_guide=self.character["style_guide"],
-            language_name=language_name,
-            plan_name=plan_name,
-            company_name=company_name if company_name else "the insurer",
-            one_line_pitch=one_line_pitch,
+        company_part = f" from {company_name}" if company_name else ""
+        # Ensure pitch doesn't start with "it " for flow
+        pitch = one_line_pitch.lstrip()
+        if pitch.lower().startswith("it "):
+            pitch = pitch[3:]
+
+        return (
+            f"Hi, this is {name}{company_part}. "
+            f"I'm calling to discuss the {plan_name} — a plan that {pitch}. "
+            f"Have you come across this plan before, or would you like me to walk you through it quickly?"
         )
-
-        try:
-            import re as _re
-            raw = self._llm.complete([
-                {"role": "system", "content": prompt_text},
-                {"role": "user", "content": "start"},
-            ])
-            # Strip any [Name], [Customer], [Client] placeholders the LLM might emit
-            raw = _re.sub(r'\[(?:Name|Customer|Client|User)\]', '', raw, flags=_re.IGNORECASE).strip()
-            return raw
-        except Exception:
-            # Fallback: build a simple but still contextual opener from metadata
-            company_part = f" from {company_name}" if company_name else ""
-            return (
-                f"Hi, I'm {self.character['name']}. "
-                f"I'm here to talk to you about {plan_name}{company_part} — {one_line_pitch}. "
-                f"Have you come across this plan before, or would you like me to give you a quick overview?"
-            )
 
     def chat(self, user_text: str) -> str:
         """
