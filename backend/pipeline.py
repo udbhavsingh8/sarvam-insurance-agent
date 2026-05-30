@@ -172,8 +172,18 @@ async def run_voice_pipeline(
             pass
         return
 
+    p = session.memory.customer_profile
     await websocket.send_text(json.dumps({
         "type": "done",
         "language": session.language,
         "stage": session.memory.stage,
+        "profile": {
+            "fields": p.fields_collected,
+            "age": p.age,
+            "smoker": p.smoker,
+            "income_range": p.income_range,
+            "dependents": p.dependents,
+            "marital_status": p.marital_status,
+            "gender": p.gender,
+        },
     }))

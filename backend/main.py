@@ -48,6 +48,20 @@ _sessions: dict[str, AgentSession] = {}
 _jobs: dict[str, dict] = {}
 _session_locks: dict[str, asyncio.Lock] = {}
 
+
+def _profile_snapshot(session: "AgentSession") -> dict:
+    """Return a compact profile dict for the frontend indicator."""
+    p = session.memory.customer_profile
+    return {
+        "fields": p.fields_collected,
+        "age": p.age,
+        "smoker": p.smoker,
+        "income_range": p.income_range,
+        "dependents": p.dependents,
+        "marital_status": p.marital_status,
+        "gender": p.gender,
+    }
+
 MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
@@ -218,6 +232,7 @@ async def chat(
         "reply": reply,
         "language": session.language,
         "stage": session.memory.stage,
+        "profile": _profile_snapshot(session),
     })
 
 
@@ -310,6 +325,17 @@ async def evaluate(session_id: str = Form(...)) -> JSONResponse:
 
     session.end_session()
     return JSONResponse(result)
+
+
+@app.get("/transcript/{session_id}")
+async def get_transcript(session_id: str) -> JSONResponse:
+    session = _get_session(session_id)
+    turns = [
+        {"role": t["role"], "text": t["text"], "stage": t.get("stage", ""), "turn": t.get("turn", 0)}
+        for t in session.memory.turn_log
+        if t["role"] in ("user", "assistant")
+    ]
+    return JSONResponse({"turns": turns, "stage": session.memory.stage})
 
 
 @app.delete("/session/{session_id}")
