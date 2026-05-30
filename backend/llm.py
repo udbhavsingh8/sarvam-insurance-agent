@@ -29,7 +29,7 @@ class LLMConfig:
 
 SARVAM_M = LLMConfig(
     model_id="sarvam-m",
-    max_tokens=1024,
+    max_tokens=900,   # think block ~400t + response ~200t; prompt trimmed to ~4500t so total ~5400t < 7192
     temperature=0.7,
     strip_think_tags=True,
 )
@@ -46,6 +46,14 @@ ACTIVE_CONFIG: LLMConfig = SARVAM_M
 
 
 def _strip_think(text: str) -> str:
+    """
+    Remove <think>...</think> blocks from sarvam-m output.
+    If the tag is unclosed (think block consumed all tokens before </think>),
+    the entire text is junk — raise so the caller uses the fallback.
+    """
+    from errors import LLMError
+    if "<think>" in text and "</think>" not in text:
+        raise LLMError("sarvam-m think block truncated — no content produced")
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 

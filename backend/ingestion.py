@@ -73,12 +73,82 @@ def _extract_metadata(text: str) -> dict:
     except Exception:
         pass
 
-    # safe fallback — caller always gets a usable dict
+    # LLM failed — extract from text using keyword patterns
+    return _extract_metadata_from_text(text)
+
+
+def _extract_metadata_from_text(text: str) -> dict:
+    """
+    Keyword-based metadata extraction — no LLM, no API. Always returns real data.
+    Used as fallback when LLM call fails or API key is missing.
+    """
+    snippet = text[:3000]
+    lines = snippet.splitlines()
+
+    # ── Company name ─────────────────────────────────────────────────
+    known_companies = [
+        ("HDFC Life", "HDFC Life"),
+        ("HDFC", "HDFC Life"),
+        ("Axis Max Life", "Axis Max Life"),
+        ("Max Life", "Max Life Insurance"),
+        ("ICICI Prudential", "ICICI Prudential Life Insurance"),
+        ("ICICI Pru", "ICICI Prudential Life Insurance"),
+        ("SBI Life", "SBI Life Insurance"),
+        ("Bajaj Allianz", "Bajaj Allianz Life Insurance"),
+        ("Tata AIA", "Tata AIA Life Insurance"),
+        ("Kotak Life", "Kotak Life Insurance"),
+        ("Kotak Mahindra", "Kotak Life Insurance"),
+        ("Aditya Birla", "Aditya Birla Sun Life Insurance"),
+        ("PNB MetLife", "PNB MetLife"),
+        ("Reliance Nippon", "Reliance Nippon Life Insurance"),
+        ("Canara HSBC", "Canara HSBC Life Insurance"),
+        ("LIC", "LIC"),
+        ("Life Insurance Corporation", "LIC"),
+    ]
+    company_name = ""
+    for pattern, display in known_companies:
+        if pattern.lower() in snippet.lower():
+            company_name = display
+            break
+
+    # ── Plan name — look for "Introducing X" or first all-caps / title line ──
+    plan_name = ""
+    intro_match = re.search(r"Introducing\s+([A-Za-z0-9 &\-+]+)", snippet)
+    if intro_match:
+        plan_name = intro_match.group(1).strip()
+    else:
+        # Try lines that look like product names (mixed case, 2-6 words, not sentence)
+        for line in lines[:30]:
+            line = line.strip()
+            if 10 < len(line) < 60 and not line.endswith(".") and not line.startswith("*"):
+                words = line.split()
+                if 2 <= len(words) <= 7 and any(w[0].isupper() for w in words):
+                    plan_name = line
+                    break
+
+    if not plan_name:
+        plan_name = company_name + " Insurance Plan" if company_name else "Insurance Plan"
+
+    # ── Plan type ─────────────────────────────────────────────────────
+    plan_type = _detect_plan_type(snippet, "other")
+
+    # ── One-line pitch by plan type ───────────────────────────────────
+    pitches = {
+        "term": "provides a large life cover to protect your family financially if something happens to you",
+        "health": "covers hospitalisation and medical expenses so your family never faces a financial crisis during illness",
+        "ulip": "combines life insurance with market-linked investments to grow your wealth and protect your family",
+        "savings": "helps you save systematically while keeping your family protected and earning guaranteed returns",
+        "pension": "builds a retirement corpus so you have a steady income after you stop working",
+        "child": "secures your child's future with a dedicated corpus for education or marriage",
+        "other": "provides financial protection and security for you and your family",
+    }
+    one_line_pitch = pitches.get(plan_type, pitches["other"])
+
     return {
-        "plan_name": "this plan",
-        "company_name": "",
-        "plan_type": "other",
-        "one_line_pitch": "it provides financial protection for you and your family",
+        "plan_name": plan_name,
+        "company_name": company_name,
+        "plan_type": plan_type,
+        "one_line_pitch": one_line_pitch,
     }
 
 

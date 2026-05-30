@@ -207,14 +207,28 @@ class AgentSession:
             if self.memory.stage == "EXPLAIN" else ""
         )
 
+        # sarvam-m context window is 7192 tokens. Budget: ~5800 for system prompt,
+        # ~600 for max_tokens output, leaving headroom for history turns.
+        # sales_brief is the biggest variable — cap it so the prompt never overflows.
+        BRIEF_CHAR_LIMIT = 3200    # ~800 tokens
+        DOC_CONTEXT_CHAR_LIMIT = 1200  # ~300 tokens
+
+        brief = self.store.sales_brief or "No product profile available."
+        if len(brief) > BRIEF_CHAR_LIMIT:
+            brief = brief[:BRIEF_CHAR_LIMIT] + "\n[... product profile truncated for brevity ...]"
+
+        raw_context = self.store.get_context(user_text, top_k=1)
+        if len(raw_context) > DOC_CONTEXT_CHAR_LIMIT:
+            raw_context = raw_context[:DOC_CONTEXT_CHAR_LIMIT]
+
         system = MAIN_SYSTEM_PROMPT.format(
             name=self.character["name"],
             persona=self.character["persona"],
             style_guide=self.character["style_guide"],
             emotional_guide=self.character["emotional_guide"],
-            sales_brief=self.store.sales_brief or "No product profile available — use document reference only.",
+            sales_brief=brief,
             language_name=language_display_name(self.memory.detected_language),
-            document_context=self.store.get_context(user_text, top_k=2),
+            document_context=raw_context,
             customer_profile=self.memory.customer_profile.summary(),
             memory_summary=self.memory.memory_summary(),
             stage=self.memory.stage,
@@ -226,8 +240,8 @@ class AgentSession:
             meta_tag_instruction=META_TAG_INSTRUCTION,
         )
 
-        # Build history from turn_log (user/assistant pairs only), capped to last 20 turns
-        MAX_HISTORY_TURNS = 20
+        # Build history from turn_log (user/assistant pairs only), capped to last 10 turns
+        MAX_HISTORY_TURNS = 10
         relevant_log = self.memory.turn_log[-(MAX_HISTORY_TURNS * 2):]
         history: list[dict] = []
         for entry in relevant_log:
