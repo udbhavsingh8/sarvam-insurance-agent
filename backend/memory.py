@@ -54,10 +54,13 @@ class SessionMemory:
     _language_candidate_confidence: float = field(default=0.0, repr=False)
 
     # ── Sales stage machine ─────────────────────────────────────────
-    stage: str = "GREETING"
+    stage: str = "CONNECT"
     previous_stage: Optional[str] = None
     return_to_stage: Optional[str] = None   # set when entering QUESTION_ANSWER
     turn_in_stage: int = 0
+
+    # ── Customer emotional state (updated every turn from META tag) ──
+    emotional_state: str = "curious"  # curious | engaged | hesitant | resistant | anxious | satisfied
 
     # ── Customer profile (built during DISCOVERY / QUALIFICATION) ───
     customer_name: Optional[str] = None
@@ -148,7 +151,8 @@ class SessionMemory:
         lines.append(
             f"Interest: {self.intelligence.interest_level}/100  "
             f"Close readiness: {self.intelligence.close_readiness}/100  "
-            f"Intent: {self.intelligence.buying_intent}"
+            f"Intent: {self.intelligence.buying_intent}  "
+            f"Emotional state: {self.emotional_state}"
         )
 
         return "\n".join(lines) if lines else "First interaction — no history yet."

@@ -17,7 +17,7 @@ from errors import LLMError
 from llm import LLMClient
 from memory import SessionMemory
 from metrics import TurnMetrics, log_session, log_turn
-from prompts import ADVISOR_RULES, MAIN_SYSTEM_PROMPT, META_TAG_INSTRUCTION, STAGE_INTENTS, VOICE_RULES, language_display_name
+from prompts import ADVISOR_RULES, DEFLECTION_PLAYBOOK, MAIN_SYSTEM_PROMPT, META_TAG_INSTRUCTION, STAGE_INTENTS, VOICE_RULES, language_display_name
 from rag import DocumentStore
 
 _FALLBACK = "I'm having a connection issue right now. Could you give me a moment and try again?"
@@ -168,6 +168,7 @@ class AgentSession:
             name=self.character["name"],
             persona=self.character["persona"],
             style_guide=self.character["style_guide"],
+            emotional_guide=self.character["emotional_guide"],
             language_name=language_display_name(self.memory.detected_language),
             document_context=self.store.get_context(user_text),
             memory_summary=self.memory.memory_summary(),
@@ -175,6 +176,7 @@ class AgentSession:
             stage_intent=STAGE_INTENTS.get(self.memory.stage, ""),
             voice_rules=VOICE_RULES,
             advisor_rules=ADVISOR_RULES,
+            deflection_playbook=DEFLECTION_PLAYBOOK,
             meta_tag_instruction=META_TAG_INSTRUCTION,
         )
 

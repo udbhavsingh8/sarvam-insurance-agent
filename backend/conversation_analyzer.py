@@ -28,6 +28,16 @@ if TYPE_CHECKING:
     from memory import SessionMemory
 
 
+VALID_STAGES = {
+    "CONNECT", "EXPLORE", "UNDERSTAND", "PRESENT",
+    "HANDLE", "DECIDE", "CLOSE", "QUESTION_ANSWER",
+}
+
+VALID_EMOTIONAL_STATES = {
+    "curious", "engaged", "hesitant", "resistant", "anxious", "satisfied",
+}
+
+
 @dataclass
 class TurnAnalysis:
     stage: str
@@ -35,6 +45,7 @@ class TurnAnalysis:
     objection_category: Optional[str]
     objection_resolved: bool
     close_readiness_delta: int
+    emotional_state: str = "curious"
 
 
 _META_PATTERN = re.compile(r'\[META([^\]]*)\]', re.IGNORECASE)
@@ -69,12 +80,19 @@ def parse_meta_tag(text: str) -> tuple[str, Optional[TurnAnalysis]]:
     if category == "none":
         category = None
 
+    raw_stage = _extract(raw_tag, "stage").upper()
+    stage = raw_stage if raw_stage in VALID_STAGES else ""
+
+    raw_emotion = _extract(raw_tag, "emotional_state").lower()
+    emotional_state = raw_emotion if raw_emotion in VALID_EMOTIONAL_STATES else "curious"
+
     analysis = TurnAnalysis(
-        stage=_extract(raw_tag, "stage"),
+        stage=stage,
         interest_delta=_int_val(raw_tag, "interest_delta", 0),
         objection_category=category,
         objection_resolved=_extract(raw_tag, "objection_resolved", "false").lower() == "true",
         close_readiness_delta=_int_val(raw_tag, "close_readiness_delta", 0),
+        emotional_state=emotional_state,
     )
     return clean, analysis
 
@@ -98,6 +116,10 @@ def apply_analysis(
         memory.turn_in_stage = 0
     else:
         memory.turn_in_stage += 1
+
+    # Emotional state update
+    if analysis.emotional_state:
+        memory.emotional_state = analysis.emotional_state
 
     # Interest update
     intel.interest_level = max(0, min(100, intel.interest_level + analysis.interest_delta))
