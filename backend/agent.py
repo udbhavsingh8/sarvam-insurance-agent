@@ -185,29 +185,14 @@ class AgentSession:
         """
         Stream agent response tokens. Caller must collect the full text
         to update history — call record_turn() after streaming is done.
-        On think-block overflow, retries with a slimmed prompt transparently.
         """
-        from errors import LLMError
-        from llm import _slim_messages
-
         messages = self._build_messages(user_text)
         self._pending_user_text = user_text
         self._stream_parts: list[str] = []
 
-        try:
-            for token in self._llm.stream(messages):
-                self._stream_parts.append(token)
-                yield token
-        except LLMError as exc:
-            if "no content after think block" in str(exc):
-                # Retry with stripped prompt — clear any partial stream state
-                self._stream_parts = []
-                slim = _slim_messages(messages)
-                for token in self._llm.stream(slim):
-                    self._stream_parts.append(token)
-                    yield token
-            else:
-                raise
+        for token in self._llm.stream(messages):
+            self._stream_parts.append(token)
+            yield token
 
     def record_turn(
         self,
@@ -302,8 +287,8 @@ class AgentSession:
         # sarvam-m context window is 7192 tokens. Budget: ~5800 for system prompt,
         # ~600 for max_tokens output, leaving headroom for history turns.
         # sales_brief is the biggest variable — cap it so the prompt never overflows.
-        BRIEF_CHAR_LIMIT = 1400    # ~610 tokens at sarvam tokenizer rate
-        DOC_CONTEXT_CHAR_LIMIT = 700   # ~305 tokens
+        BRIEF_CHAR_LIMIT = 2000
+        DOC_CONTEXT_CHAR_LIMIT = 1000
 
         brief = self.store.sales_brief or "No product profile available."
         if len(brief) > BRIEF_CHAR_LIMIT:
@@ -376,9 +361,7 @@ class AgentSession:
             meta_tag_instruction=META_TAG_INSTRUCTION,
         )
 
-        # Build history from turn_log (user/assistant pairs only), capped to last 4 turns
-        # Each turn is ~150 chars avg; 4 turns ≈ 600 chars ≈ 260 tokens at sarvam rate
-        MAX_HISTORY_TURNS = 4
+        MAX_HISTORY_TURNS = 6
         relevant_log = self.memory.turn_log[-(MAX_HISTORY_TURNS * 2):]
         history: list[dict] = []
         for entry in relevant_log:
