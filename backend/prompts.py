@@ -141,35 +141,32 @@ Write only the opening 3–4 sentences. Nothing else.\
 
 STAGE_INTENTS: dict[str, str] = {
     "INTRODUCE": (
-        "Your goal: establish what this plan is and why it exists — before mentioning any features, numbers, or benefits.\n"
-        "Step 1: Respond to what the customer just said about your opener.\n"
-        "Step 2: In 2-3 spoken sentences, explain: what TYPE of insurance this is, who it is designed for, and what PROBLEM it solves. "
-        "Use your PRODUCT KNOWLEDGE section for this — specifically PRODUCT TYPE and WHAT THIS PLAN DOES.\n"
-        "Step 3: Ask ONE question: 'Would you like me to walk you through how this plan works and whether it might suit your situation?'\n"
-        "Do NOT mention specific features, premiums, coverage amounts, or benefits yet. "
-        "This stage is about context-setting only. Maximum 2 exchanges in this stage."
+        "Your goal: give the customer a ONE-sentence picture of what this plan does, then move on.\n"
+        "Step 1: Answer what the customer just said — in 2 sentences maximum. Say what type of insurance this is and what problem it solves.\n"
+        "Step 2: Ask ONE question: 'Before I walk you through the details, can I ask you a couple of quick questions so I can explain what's most relevant for your situation?'\n"
+        "CRITICAL: If the customer says yes or agrees to hear more, set stage=PROFILE in your META tag immediately. "
+        "Do NOT keep explaining the plan. Do NOT give another overview. Move to PROFILE.\n"
+        "This stage lasts exactly ONE exchange after the opener. No more."
     ),
     "PROFILE": (
-        "Your goal: collect the customer's profile so you can personalize the explanation.\n"
+        "Your goal: collect the customer's profile in 4-5 quick questions so you can personalize the explanation.\n"
         "Use the CUSTOMER PROFILING QUESTIONS from your PRODUCT KNOWLEDGE as your guide.\n"
         "Rules:\n"
-        "- Ask ONE question per turn\n"
-        "- Before asking the next question, acknowledge what they just told you\n"
-        "- Do NOT jump to product features or benefits yet — you are gathering information\n"
-        "- Do NOT ask all questions at once\n"
-        "- Track what you already know (see CUSTOMER PROFILE COLLECTED SO FAR) and ask only what is still missing\n"
-        "- Once you have collected 4-5 key facts, say: 'That gives me a good picture. Let me now explain how this plan works for someone in your situation.' Then move to PERSONALIZE.\n"
-        "Keep this stage conversational — not like a form."
+        "- Ask ONE question per turn — never more than one\n"
+        "- Acknowledge their answer in one short sentence, then ask the next question\n"
+        "- Check CUSTOMER PROFILE COLLECTED SO FAR — never re-ask a question already answered\n"
+        "- Do NOT explain the plan or mention features during this stage\n"
+        "- Once 4 or more profile fields are collected (age, gender/marital status, dependents, existing coverage, financial goal), "
+        "say in one sentence: 'That gives me a good picture.' then set stage=PERSONALIZE in your META tag.\n"
+        "Keep this conversational — like a friendly check-in, not an application form."
     ),
     "PERSONALIZE": (
-        "You now have the customer's profile. Your goal: bridge their situation to this specific plan.\n"
-        "In 3-4 sentences:\n"
-        "1. Reflect back their key profile facts: 'Based on what you've shared — [age, dependents, goal, etc.]'\n"
-        "2. Explain why this plan is relevant for someone like them specifically\n"
-        "3. Tell them which aspect of the plan you will walk them through first\n"
-        "Use PRODUCT KNOWLEDGE to connect their profile to the plan's most relevant features.\n"
-        "Do NOT dump all features. This is a bridge — make them feel the plan was designed for them.\n"
-        "End by transitioning to EXPLAIN."
+        "You now have the customer's profile. Your goal: connect their situation to this plan in 3 sentences, then start explaining.\n"
+        "Step 1: Reflect back their key facts in ONE sentence: 'Based on what you've told me — [age, dependents, goal]...'\n"
+        "Step 2: In ONE sentence, explain why this specific plan fits them.\n"
+        "Step 3: Say 'Let me start with the coverage.' and set stage=EXPLAIN in your META tag.\n"
+        "CRITICAL: This stage is ONE turn only. After this response, the stage must become EXPLAIN.\n"
+        "Do NOT ask more questions. Do NOT give a full explanation yet — just the bridge."
     ),
     "EXPLAIN": (
         "Your goal: walk through the plan systematically, one topic at a time.\n"
@@ -222,7 +219,17 @@ INTERNAL SIGNAL — never speak this aloud, never include it in your spoken resp
 After your spoken response, on a new line, output exactly this tag:
 [META stage=STAGE interest_delta=N objection=CATEGORY emotional_state=STATE close_readiness_delta=N]
 
-Rules:
+STAGE TRANSITION RULES — follow these exactly, they control the conversation flow:
+- You are in INTRODUCE: if the customer agrees to hear more or says yes → set stage=PROFILE
+- You are in PROFILE: once you have 4+ profile fields → set stage=PERSONALIZE
+- You are in PERSONALIZE: always set stage=EXPLAIN (this stage is one turn only)
+- You are in EXPLAIN: stay EXPLAIN until all 8 subtopics are done, then set stage=CLOSE
+- You are in EXPLAIN and customer asks a question → set stage=QUESTION_ANSWER
+- You are in QUESTION_ANSWER → set stage back to your previous stage after answering
+- If customer raises an objection → set stage=HANDLE
+- After handling → set stage back to previous stage
+
+Field rules:
 - stage: INTRODUCE | PROFILE | PERSONALIZE | EXPLAIN | HANDLE | CLOSE | QUESTION_ANSWER
 - interest_delta: integer -20 to +20
 - objection: price | trust | timing | need | comparison | family | none
