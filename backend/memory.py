@@ -210,9 +210,17 @@ class SessionMemory:
         if profile_summary != "No customer profile collected yet.":
             lines.append(f"Customer profile:\n{profile_summary}")
 
+        lead = self.intelligence.lead_score()
+        close_hint = ""
+        if lead >= 70:
+            close_hint = " ← HIGH — move toward recommendation and close"
+        elif lead >= 50:
+            close_hint = " ← WARM — start building toward recommendation"
+
         lines.append(
             f"Interest: {self.intelligence.interest_level}/100  "
             f"Close readiness: {self.intelligence.close_readiness}/100  "
+            f"Lead score: {lead}/100{close_hint}  "
             f"Intent: {self.intelligence.buying_intent}  "
             f"Emotional state: {self.emotional_state}"
         )

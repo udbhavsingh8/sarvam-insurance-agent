@@ -53,7 +53,7 @@ async def run_voice_pipeline(
       Text frame  {"type": "error", "message": "..."}   — LLM failure
     """
     from conversation_analyzer import parse_meta_tag
-    from tts import synthesize_stream
+    from tts import normalize_for_tts, synthesize_stream
 
     loop = asyncio.get_running_loop()
     token_queue: asyncio.Queue[str | Exception | None] = asyncio.Queue()
@@ -80,10 +80,11 @@ async def run_voice_pipeline(
         await websocket.send_text(json.dumps({"type": "sentence", "text": clean}))
 
         audio_queue: asyncio.Queue[bytes | Exception | None] = asyncio.Queue()
+        tts_text = normalize_for_tts(clean)
 
         def _tts_produce() -> None:
             try:
-                for chunk in synthesize_stream(clean, session.language, session.speaker):
+                for chunk in synthesize_stream(tts_text, session.language, session.speaker):
                     audio_queue.put_nowait(chunk)
                 audio_queue.put_nowait(None)
             except Exception as exc:
