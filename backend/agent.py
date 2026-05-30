@@ -202,6 +202,7 @@ class AgentSession:
             persona=self.character["persona"],
             style_guide=self.character["style_guide"],
             emotional_guide=self.character["emotional_guide"],
+            sales_brief=self.store.sales_brief or "No product brief available — use document reference only.",
             language_name=language_display_name(self.memory.detected_language),
             document_context=self.store.get_context(user_text),
             memory_summary=self.memory.memory_summary(),

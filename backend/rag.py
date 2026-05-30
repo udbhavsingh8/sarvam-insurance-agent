@@ -1,5 +1,5 @@
 import re
-from ingestion import load_document, load_metadata
+from ingestion import load_document, load_metadata, load_sales_brief
 
 CHUNK_SIZE = 600    # chars per chunk
 TOP_K      = 4      # chunks to include in context
@@ -30,6 +30,7 @@ class DocumentStore:
         self.text = load_document(index_dir, name)
         self.name = name
         self.metadata: dict = load_metadata(index_dir, name)
+        self.sales_brief: str = load_sales_brief(index_dir, name)
         self._chunks = _make_chunks(self.text)
 
     def retrieve(self, query: str, top_k: int = TOP_K) -> str:

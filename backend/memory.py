@@ -54,7 +54,7 @@ class SessionMemory:
     _language_candidate_confidence: float = field(default=0.0, repr=False)
 
     # ── Sales stage machine ─────────────────────────────────────────
-    stage: str = "CONNECT"
+    stage: str = "CONNECT"  # CONNECT | QUALIFY | PITCH | HANDLE | CLOSE | QUESTION_ANSWER
     previous_stage: Optional[str] = None
     return_to_stage: Optional[str] = None   # set when entering QUESTION_ANSWER
     turn_in_stage: int = 0
