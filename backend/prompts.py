@@ -137,14 +137,14 @@ STAGE_INTENTS: dict[str, str] = {
     ),
     "EXPLAIN": (
         "Explain the plan one topic at a time. Check EXPLAIN TOPIC NOW for your current topic.\n"
-        "IF THIS IS TOPIC 1 (your first response in EXPLAIN): open with one sentence restating "
-        "the customer's situation — 'Based on what you have shared — [age, smoker status, dependents] — "
-        "let me walk you through what matters most for you.' Then immediately explain Topic 1.\n"
-        "FOR EVERY TOPIC, follow this structure:\n"
-        "  (a) State the specific fact from PRODUCT KNOWLEDGE — use real numbers.\n"
-        "  (b) Connect it directly to the customer's profile: use their actual age, income, family. Never a generic example.\n"
-        "  (c) End with a natural invitation to continue: 'Does that make sense?' or 'Shall I cover [next topic] next?'\n"
-        "ONE topic per response. Use only facts from PRODUCT KNOWLEDGE and DOCUMENT REFERENCE. "
+        "IF THIS IS TOPIC 1: open with one sentence restating the customer's profile — "
+        "'Based on what you have shared — [age, smoker/non-smoker, dependents] — let me walk you through what matters most for you.' "
+        "Then immediately explain Topic 1.\n"
+        "FOR EVERY TOPIC:\n"
+        "  (a) Use the RECOMMENDED NUMBERS if available — refer to the suggested cover amount and estimated premium directly.\n"
+        "  (b) State the document fact. Connect it to their actual profile — never a generic example.\n"
+        "  (c) End with a natural check-in: 'Does that make sense?' or 'Want me to move on to [next topic]?'\n"
+        "ONE topic per response. Numbers must come from PRODUCT KNOWLEDGE, DOCUMENT REFERENCE, or RECOMMENDED NUMBERS. "
         "After the FINAL TOPIC, set stage=CLOSE."
     ),
     "HANDLE": (
@@ -153,11 +153,14 @@ STAGE_INTENTS: dict[str, str] = {
         "After handling: return to EXPLAIN if still explaining, or CLOSE if customer was nearly ready."
     ),
     "CLOSE": (
-        "The customer has shown genuine interest. Shift from explaining to recommending and closing.\n"
-        "Step 1: Give a clear personal recommendation: 'Based on everything you've shared — [age, income, family] — "
-        "this plan gives your family [specific protection amount] for [daily/monthly cost]. It is a strong fit for your situation.'\n"
-        "Step 2: Suggest a concrete next step: 'Would you like me to share a personalised quote?' "
-        "or 'Shall I walk you through what the application process looks like?'\n"
+        "The customer is ready. Shift from explaining to recommending and closing.\n"
+        "Step 1 — Personal recommendation: Use the RECOMMENDED NUMBERS block to give a specific, "
+        "personalised summary. Example: 'Based on everything you have shared — [age, smoker status, income, dependents] — "
+        "a cover of [suggested cover] would protect your family, and the estimated premium is around [premium display]. "
+        "That is roughly [daily premium] a day — less than a cup of coffee.' "
+        "Use these exact numbers. Do not approximate differently.\n"
+        "Step 2 — Concrete next step: 'Would you like me to get you a personalised quote?' "
+        "or 'Shall I walk you through what the application looks like?'\n"
         "If they hesitate: 'What is the one thing still holding you back?' — address it, then ask once more.\n"
         "Never push twice in a row. If not ready: 'No problem — I am here when you are ready.'"
     ),
@@ -212,7 +215,7 @@ CUSTOMER PROFILE COLLECTED SO FAR:
 
 WHAT ELSE YOU KNOW ABOUT THIS CUSTOMER:
 {memory_summary}
-
+{recommendation_block}
 CURRENT STAGE: {stage}
 {explain_subtopic_line}YOUR GOAL THIS TURN: {stage_intent}
 

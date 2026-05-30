@@ -127,8 +127,7 @@ def apply_analysis(
     if (memory.stage == "EXPLAIN"
             and analysis.stage == "EXPLAIN"
             and memory.turn_in_stage > 0):   # turn_in_stage > 0 means we stayed, not just entered
-        from memory import EXPLAIN_SUBTOPICS
-        if memory.explain_subtopic_index < len(EXPLAIN_SUBTOPICS) - 1:
+        if memory.explain_topics and memory.explain_subtopic_index < len(memory.explain_topics) - 1:
             memory.explain_subtopic_index += 1
 
     # Interest update

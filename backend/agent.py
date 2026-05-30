@@ -19,6 +19,7 @@ from memory import SessionMemory
 from metrics import TurnMetrics, log_session, log_turn
 from profile_extractor import extract_profile_fields
 from prompts import ADVISOR_RULES, DEFLECTION_PLAYBOOK, MAIN_SYSTEM_PROMPT, META_TAG_INSTRUCTION, OPENER_PROMPT, STAGE_INTENTS, VOICE_RULES, language_display_name
+from recommendation import build_recommendation_block
 from rag import DocumentStore
 
 _FALLBACK = "I'm having a connection issue right now. Could you give me a moment and try again?"
@@ -53,6 +54,16 @@ def _auto_advance_stage(memory: SessionMemory) -> None:
         memory.previous_stage = stage
         memory.stage = "EXPLAIN"
         memory.turn_in_stage = 0
+        return
+
+    if stage in ("HANDLE", "QUESTION_ANSWER"):
+        # Force return to previous stage after 1 turn — never let QA/HANDLE become a trap.
+        if memory.turn_in_stage >= 1:
+            return_to = memory.return_to_stage or memory.previous_stage or "EXPLAIN"
+            memory.previous_stage = stage
+            memory.stage = return_to
+            memory.return_to_stage = None
+            memory.turn_in_stage = 0
         return
 
     if stage == "EXPLAIN":
@@ -292,6 +303,42 @@ class AgentSession:
         if len(raw_context) > DOC_CONTEXT_CHAR_LIMIT:
             raw_context = raw_context[:DOC_CONTEXT_CHAR_LIMIT]
 
+        # Recommendation block: inject at EXPLAIN and CLOSE only.
+        # Fast arithmetic — no LLM call. Empty string at all other stages.
+        if self.memory.stage in ("EXPLAIN", "CLOSE"):
+            rec_block = build_recommendation_block(
+                self.memory.customer_profile,
+                self.store.metadata,
+                self.store.sales_brief,
+            )
+            recommendation_block = (
+                f"\nRECOMMENDED NUMBERS FOR THIS CUSTOMER:\n{rec_block}\n"
+                if rec_block else ""
+            )
+        else:
+            recommendation_block = ""
+
+        stage_intent = STAGE_INTENTS.get(self.memory.stage, "")
+        if self.memory.stage == "CLOSE":
+            intent = self.memory.intelligence.buying_intent
+            if intent == "hot":
+                stage_intent += (
+                    "\nBuying intent: HOT — skip soft probing. "
+                    "Give the recommendation then ask directly: "
+                    "'Shall I walk you through what the application looks like?'"
+                )
+            elif intent == "warm":
+                stage_intent += (
+                    "\nBuying intent: WARM — give the recommendation with numbers, "
+                    "then ask: 'Would you like me to get you a personalised quote?'"
+                )
+            else:
+                stage_intent += (
+                    "\nBuying intent: COLD/UNKNOWN — before the close ask, "
+                    "say: 'What is the one thing still holding you back?' "
+                    "Address it, then make a single ask."
+                )
+
         system = MAIN_SYSTEM_PROMPT.format(
             name=self.character["name"],
             persona=self.character["persona"],
@@ -302,9 +349,10 @@ class AgentSession:
             document_context=raw_context,
             customer_profile=self.memory.customer_profile.summary(),
             memory_summary=self.memory.memory_summary(),
+            recommendation_block=recommendation_block,
             stage=self.memory.stage,
             explain_subtopic_line=explain_subtopic_line,
-            stage_intent=STAGE_INTENTS.get(self.memory.stage, ""),
+            stage_intent=stage_intent,
             voice_rules=VOICE_RULES,
             advisor_rules=ADVISOR_RULES,
             deflection_playbook=DEFLECTION_PLAYBOOK,
