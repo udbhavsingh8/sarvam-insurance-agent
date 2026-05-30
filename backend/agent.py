@@ -102,8 +102,17 @@ class AgentSession:
         one_line_pitch = meta.get("one_line_pitch", "provides financial protection for your family")
         name = self.character["name"]
 
+        import re as _re
+
+        def _clean(s: str) -> str:
+            # Strip any LLM-generated placeholders like [Name], [Age], [X]
+            return _re.sub(r'\[[^\]]{0,40}\]', '', s).strip()
+
+        plan_name = _clean(plan_name)
+        company_name = _clean(company_name)
+        one_line_pitch = _clean(one_line_pitch)
+
         company_part = f" from {company_name}" if company_name else ""
-        # Ensure pitch doesn't start with "it " for flow
         pitch = one_line_pitch.lstrip()
         if pitch.lower().startswith("it "):
             pitch = pitch[3:]

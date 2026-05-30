@@ -725,6 +725,16 @@ function setListeningState(on) {
   }
 }
 
+function setPreparingAudio(on) {
+  const lbl = document.getElementById("agent-status-label");
+  const dot = document.getElementById("status-dot");
+  if (on) {
+    dot.className = "thinking";
+    lbl.textContent = "Preparing audio…";
+  }
+  // Cleared automatically when first binary audio frame arrives
+}
+
 function setIdleState(label) {
   setSpeakingState(false);
   setThinkingState(false);
@@ -998,6 +1008,9 @@ async function voicePipeline(message, sttLatencyMs) {
           queueAudio(blob);
         }
 
+      } else if (msg.type === "preparing_audio") {
+        setPreparingAudio(true);
+
       } else if (msg.type === "done") {
         updateStageBadge(msg.stage);
         updateLangBadge(msg.language || "en-IN");
@@ -1008,6 +1021,7 @@ async function voicePipeline(message, sttLatencyMs) {
         showBubbleError(msg.message || "An error occurred.");
       }
     } else {
+      setPreparingAudio(false);
       audioBlobs.push(new Uint8Array(evt.data));
     }
   };

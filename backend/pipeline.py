@@ -164,6 +164,12 @@ async def run_voice_pipeline(
             pass
         return
 
+    # Signal to client that text is done, audio is being prepared
+    try:
+        await websocket.send_text(json.dumps({"type": "preparing_audio"}))
+    except Exception:
+        pass
+
     # ── Phase 2: parallel TTS for all sentences ───────────────────────────
     async def _tts_one(text: str) -> bytes:
         tts_text = normalize_for_tts(text)
