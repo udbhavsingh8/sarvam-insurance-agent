@@ -1,862 +1,1071 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Insurance Sales Voice Agent — Sarvam AI</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PolicyAI — Insurance Sales Voice Agent</title>
+<style>
+:root {
+  --bg: #F0F4FF;
+  --sidebar-bg: #FFFFFF;
+  --main-bg: #F7F9FF;
+  --card-bg: #FFFFFF;
+  --accent: #5B5BD6;
+  --accent2: #818CF8;
+  --accent-light: #EEF0FF;
+  --danger: #EF4444;
+  --success: #22C55E;
+  --warning: #F59E0B;
+  --text: #111827;
+  --text2: #374151;
+  --muted: #9CA3AF;
+  --border: #E5E7EB;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
+  --shadow: 0 4px 16px rgba(91,91,214,.10);
+  --shadow-lg: 0 8px 32px rgba(91,91,214,.15);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --sidebar-w: 290px;
+}
 
-    :root {
-      --bg:       #0f1117;
-      --surface:  #1a1d27;
-      --surface2: #23273a;
-      --border:   #2e334a;
-      --accent:   #6c63ff;
-      --accent2:  #a78bfa;
-      --green:    #22c55e;
-      --red:      #ef4444;
-      --amber:    #f59e0b;
-      --text:     #e2e8f0;
-      --muted:    #94a3b8;
-      --radius:   12px;
-      --shadow:   0 4px 24px rgba(0,0,0,.45);
-    }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 24px 16px 48px;
-    }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
 
-    header {
-      width: 100%; max-width: 860px;
-      display: flex; align-items: center; gap: 12px;
-      margin-bottom: 28px;
-    }
-    header .logo {
-      width: 36px; height: 36px;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 18px;
-    }
-    header h1 { font-size: 1.2rem; font-weight: 700; }
-    header small { color: var(--muted); font-size: .75rem; }
+/* ── SIDEBAR ──────────────────────────────────────────────── */
+#sidebar {
+  width: var(--sidebar-w);
+  min-width: var(--sidebar-w);
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  box-shadow: 2px 0 12px rgba(91,91,214,.06);
+}
 
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 20px 24px;
-      width: 100%; max-width: 860px;
-      box-shadow: var(--shadow);
-      margin-bottom: 16px;
-    }
-    .card-title {
-      font-size: .7rem; font-weight: 700;
-      text-transform: uppercase; letter-spacing: .08em;
-      color: var(--muted); margin-bottom: 14px;
-    }
+.sidebar-header {
+  padding: 22px 20px 18px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+}
 
-    /* Drop zone */
-    #drop-zone {
-      border: 2px dashed var(--border);
-      border-radius: 10px; padding: 28px;
-      text-align: center; cursor: pointer;
-      transition: border-color .2s, background .2s;
-    }
-    #drop-zone:hover, #drop-zone.drag-over {
-      border-color: var(--accent);
-      background: rgba(108,99,255,.06);
-    }
-    #drop-zone .icon { font-size: 2rem; margin-bottom: 8px; }
-    #drop-zone p { color: var(--muted); font-size: .9rem; }
-    #drop-zone strong { color: var(--accent2); }
-    #file-input { display: none; }
+.brand { display: flex; align-items: center; gap: 10px; }
 
-    /* Controls */
-    .controls {
-      display: flex; flex-wrap: wrap;
-      gap: 12px; align-items: center; margin-top: 14px;
-    }
+.brand-icon {
+  width: 36px; height: 36px;
+  background: rgba(255,255,255,.2);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
 
-    /* Character cards */
-    .character-group {
-      display: flex; gap: 10px;
-    }
-    .char-card {
-      display: flex; align-items: center; gap: 8px;
-      padding: 8px 14px;
-      background: var(--surface2);
-      border: 2px solid var(--border);
-      border-radius: 10px;
-      cursor: pointer;
-      transition: border-color .15s, background .15s;
-      user-select: none;
-    }
-    .char-card:hover { border-color: var(--accent2); }
-    .char-card.selected {
-      border-color: var(--accent);
-      background: rgba(108,99,255,.12);
-    }
-    .char-card .avatar { font-size: 1.4rem; }
-    .char-card .info { line-height: 1.3; }
-    .char-card .name { font-size: .88rem; font-weight: 700; }
-    .char-card .sub  { font-size: .72rem; color: var(--muted); }
+.brand-name { font-size: 20px; font-weight: 700; color: #fff; letter-spacing: -.3px; }
+.brand-tagline { font-size: 11px; color: rgba(255,255,255,.7); margin-top: 2px; letter-spacing: .3px; }
 
-    /* Buttons */
-    .btn {
-      padding: 9px 20px; border-radius: 8px; border: none;
-      font-size: .85rem; font-weight: 700;
-      cursor: pointer; transition: opacity .15s, transform .1s;
-    }
-    .btn:active { transform: scale(.97); }
-    .btn:disabled { opacity: .4; cursor: not-allowed; }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-outline {
-      background: transparent; border: 1px solid var(--border); color: var(--text);
-    }
-    .btn-outline:hover { border-color: var(--accent2); color: var(--accent2); }
+.sidebar-section {
+  padding: 18px 16px 14px;
+  border-bottom: 1px solid var(--border);
+}
 
-    /* Status */
-    #status {
-      font-size: .8rem; padding: 5px 12px;
-      border-radius: 20px; font-weight: 600;
-      background: var(--surface2); color: var(--muted);
-      margin-left: auto;
-    }
-    #status.ready   { background: rgba(34,197,94,.15);  color: var(--green); }
-    #status.loading { background: rgba(245,158,11,.15); color: var(--amber); }
-    #status.error   { background: rgba(239,68,68,.15);  color: var(--red);   }
+.section-label {
+  font-size: 11px; font-weight: 600; letter-spacing: .6px;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 10px;
+}
 
-    /* Chat header */
-    .chat-header {
-      display: flex; align-items: center; gap: 10px;
-      margin-bottom: 14px;
-    }
-    .agent-pill {
-      display: flex; align-items: center; gap: 6px;
-      padding: 4px 12px;
-      background: rgba(108,99,255,.15);
-      border: 1px solid var(--accent);
-      border-radius: 20px;
-      font-size: .8rem; font-weight: 700; color: var(--accent2);
-    }
-    .lang-badge {
-      font-size: .75rem; padding: 3px 10px;
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 20px; color: var(--muted);
-    }
+#drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px 12px;
+  text-align: center;
+  cursor: pointer;
+  transition: all .2s;
+  background: var(--bg);
+}
+#drop-zone:hover, #drop-zone.dragover { border-color: var(--accent); background: var(--accent-light); }
+#drop-zone svg { color: var(--muted); margin-bottom: 6px; }
+#drop-zone.dragover svg { color: var(--accent); }
+.dz-title { font-size: 13px; font-weight: 500; color: var(--text2); }
+.dz-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+#file-input { display: none; }
 
-    /* Chat window */
-    #chat-window {
-      height: 380px; overflow-y: auto;
-      display: flex; flex-direction: column; gap: 12px;
-      padding: 4px 2px; scroll-behavior: smooth;
-    }
-    #chat-window::-webkit-scrollbar { width: 6px; }
-    #chat-window::-webkit-scrollbar-track { background: transparent; }
-    #chat-window::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+#upload-btn {
+  width: 100%; margin-top: 8px; padding: 8px; border: none;
+  border-radius: var(--radius-sm); background: var(--accent); color: #fff;
+  font-size: 13px; font-weight: 600; cursor: pointer; transition: background .15s, transform .1s;
+}
+#upload-btn:hover { background: #4a4ac5; }
+#upload-btn:active { transform: scale(.98); }
+#upload-btn:disabled { background: var(--muted); cursor: not-allowed; }
 
-    .msg {
-      max-width: 80%; padding: 10px 14px;
-      border-radius: 12px; font-size: .9rem;
-      line-height: 1.5; white-space: pre-wrap; word-break: break-word;
-    }
-    .msg.user {
-      align-self: flex-end;
-      background: var(--accent); color: #fff;
-      border-bottom-right-radius: 4px;
-    }
-    .msg.agent {
-      align-self: flex-start;
-      background: var(--surface2); color: var(--text);
-      border-bottom-left-radius: 4px;
-      border: 1px solid var(--border);
-    }
-    .msg.agent.streaming { opacity: .8; }
-    .msg .sender {
-      font-size: .7rem; font-weight: 700;
-      text-transform: uppercase; letter-spacing: .06em;
-      opacity: .65; margin-bottom: 4px;
-    }
+#status { font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 16px; text-align: center; }
+#status.ok { color: var(--success); }
+#status.err { color: var(--danger); }
 
-    /* Input row */
-    .input-row {
-      display: flex; gap: 10px;
-      margin-top: 14px; align-items: flex-end;
-    }
-    #text-input {
-      flex: 1; padding: 10px 14px;
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 10px; color: var(--text); font-size: .9rem;
-      resize: none; outline: none;
-      min-height: 42px; max-height: 120px; line-height: 1.4;
-      font-family: inherit;
-    }
-    #text-input:focus { border-color: var(--accent); }
+.char-grid { display: flex; flex-direction: column; gap: 8px; }
 
-    /* Mic */
-    #mic-btn {
-      width: 44px; height: 44px; border-radius: 50%;
-      border: 1px solid var(--border);
-      background: var(--surface2); color: var(--text);
-      font-size: 1.1rem; cursor: pointer; flex-shrink: 0;
-      transition: background .15s, color .15s, box-shadow .15s;
-      display: flex; align-items: center; justify-content: center;
-    }
-    #mic-btn.recording {
-      background: var(--red); color: #fff; border-color: var(--red);
-      animation: pulse 1.2s infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { box-shadow: 0 0 0 4px rgba(239,68,68,.25); }
-      50%       { box-shadow: 0 0 0 8px rgba(239,68,68,.1);  }
-    }
+.char-card {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border: 2px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer; transition: all .15s; background: var(--card-bg);
+}
+.char-card:hover { border-color: var(--accent2); background: var(--accent-light); }
+.char-card.selected { border-color: var(--accent); background: var(--accent-light); }
 
-    /* Mic hint */
-    #mic-hint {
-      font-size: .75rem; color: var(--muted);
-      margin-top: 6px; text-align: center;
-    }
+.char-avatar {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+}
+.char-info { flex: 1; min-width: 0; }
+.char-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.char-desc { font-size: 11px; color: var(--muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-    /* Retry button inside agent bubble */
-    .retry-btn {
-      display: inline-block; margin-top: 8px;
-      padding: 4px 12px; border-radius: 6px;
-      background: rgba(239,68,68,.15); border: 1px solid var(--red);
-      color: var(--red); font-size: .75rem; font-weight: 700;
-      cursor: pointer;
-    }
-    .retry-btn:hover { background: rgba(239,68,68,.25); }
+.char-check {
+  width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all .15s;
+}
+.char-card.selected .char-check { background: var(--accent); border-color: var(--accent); }
 
-    /* Interrupted turn indicator */
-    .interrupted-tag {
-      font-size: .7rem; color: var(--muted);
-      font-style: italic; margin-left: 4px;
-    }
+#session-panel { padding: 14px 16px; border-bottom: 1px solid var(--border); }
 
-    /* Waveform */
-    #waveform {
-      display: none; align-items: center; gap: 3px;
-      height: 24px; margin-top: 8px;
-    }
-    #waveform.active { display: flex; }
-    .bar {
-      width: 4px; border-radius: 2px; background: var(--red);
-      animation: wave 1s ease-in-out infinite;
-    }
-    .bar:nth-child(1) { animation-delay: 0s;   height: 8px;  }
-    .bar:nth-child(2) { animation-delay: .1s;  height: 16px; }
-    .bar:nth-child(3) { animation-delay: .2s;  height: 24px; }
-    .bar:nth-child(4) { animation-delay: .3s;  height: 16px; }
-    .bar:nth-child(5) { animation-delay: .4s;  height: 8px;  }
-    @keyframes wave {
-      0%, 100% { transform: scaleY(.4); }
-      50%       { transform: scaleY(1); }
-    }
+#start-btn {
+  width: 100%; padding: 10px; border: none; border-radius: var(--radius-sm);
+  background: var(--accent); color: #fff; font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: background .15s, transform .1s;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+#start-btn:hover:not(:disabled) { background: #4a4ac5; }
+#start-btn:active:not(:disabled) { transform: scale(.98); }
+#start-btn:disabled { background: var(--muted); cursor: not-allowed; }
 
-    /* Modal */
-    .modal-backdrop {
-      display: none; position: fixed; inset: 0;
-      background: rgba(0,0,0,.65); backdrop-filter: blur(4px);
-      z-index: 100; align-items: center; justify-content: center;
-    }
-    .modal-backdrop.open { display: flex; }
-    .modal {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 16px; padding: 28px 32px;
-      max-width: 640px; width: 90%; box-shadow: var(--shadow);
-      max-height: 80vh; overflow-y: auto;
-    }
-    .modal h2 { font-size: 1.1rem; margin-bottom: 16px; color: var(--accent2); }
-    .modal pre {
-      white-space: pre-wrap; font-size: .875rem;
-      line-height: 1.6; color: var(--text); font-family: inherit;
-    }
-    .eval-scores {
-      display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px;
-    }
-    .score-chip {
-      padding: 6px 14px; border-radius: 20px;
-      background: var(--surface2); border: 1px solid var(--border);
-      font-size: .8rem;
-    }
-    .score-chip span { font-weight: 700; color: var(--accent2); }
-    .modal-footer {
-      margin-top: 20px; display: flex; justify-content: flex-end;
-    }
+.intel-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.intel-key { font-size: 12px; color: var(--muted); }
+.intel-val { font-size: 12px; font-weight: 600; color: var(--text2); }
 
-    footer {
-      margin-top: 24px; color: var(--muted);
-      font-size: .75rem; text-align: center;
-    }
-    footer a { color: var(--accent2); text-decoration: none; }
-  </style>
+#stage-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 20px;
+  font-size: 11px; font-weight: 700; letter-spacing: .4px;
+  background: var(--accent-light); color: var(--accent);
+}
+#lang-badge-sidebar { font-size: 12px; font-weight: 600; color: var(--text2); }
+
+#eval-btn {
+  width: 100%; margin-top: 10px; padding: 8px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--card-bg); color: var(--text2);
+  font-size: 13px; font-weight: 500; cursor: pointer; transition: all .15s; display: none;
+}
+#eval-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+
+.sidebar-footer {
+  margin-top: auto; padding: 14px 16px;
+  border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); text-align: center;
+}
+
+/* ── MAIN ─────────────────────────────────────────────────── */
+#main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--main-bg); }
+
+#agent-header {
+  background: var(--card-bg); border-bottom: 1px solid var(--border);
+  padding: 14px 24px; display: flex; align-items: center; gap: 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+#agent-avatar-wrap { position: relative; width: 46px; height: 46px; flex-shrink: 0; }
+
+#agent-avatar {
+  width: 46px; height: 46px; border-radius: 50%;
+  background: linear-gradient(135deg, #5B5BD6 0%, #818CF8 100%);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; border: 3px solid var(--card-bg); transition: box-shadow .3s;
+}
+
+.speaking-ring {
+  position: absolute; inset: -4px; border-radius: 50%;
+  border: 3px solid var(--accent); opacity: 0; transition: opacity .3s;
+  animation: pulse-ring 1.2s ease-in-out infinite;
+}
+@keyframes pulse-ring {
+  0%   { transform: scale(.9); opacity: .6; }
+  50%  { transform: scale(1.08); opacity: .2; }
+  100% { transform: scale(.9); opacity: .6; }
+}
+#agent-avatar-wrap.speaking .speaking-ring { opacity: 1; }
+#agent-avatar-wrap.speaking #agent-avatar { box-shadow: 0 0 0 4px rgba(91,91,214,.2); }
+
+#agent-header-info { flex: 1; }
+#agent-name { font-size: 16px; font-weight: 700; color: var(--text); }
+
+.agent-status-row { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+
+#status-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--muted);
+  flex-shrink: 0; transition: background .2s;
+}
+#status-dot.idle     { background: var(--muted); }
+#status-dot.speaking { background: var(--accent); animation: dot-blink 1s infinite; }
+#status-dot.thinking { background: var(--warning); animation: dot-blink .8s infinite; }
+#status-dot.listening{ background: var(--danger);  animation: dot-blink .6s infinite; }
+#status-dot.online   { background: var(--success); }
+@keyframes dot-blink { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+
+#agent-status-label { font-size: 12px; color: var(--muted); transition: color .2s; }
+
+#speaking-bars { display: none; align-items: flex-end; gap: 2px; height: 16px; margin-left: 4px; }
+
+.eq-bar { width: 3px; border-radius: 2px; background: var(--accent); animation: eq 1s ease-in-out infinite alternate; }
+.eq-bar:nth-child(1) { animation-duration: .6s; }
+.eq-bar:nth-child(2) { animation-duration: .9s; animation-delay: .15s; }
+.eq-bar:nth-child(3) { animation-duration: .7s; animation-delay: .3s; }
+.eq-bar:nth-child(4) { animation-duration: 1.1s; animation-delay: .1s; }
+.eq-bar:nth-child(5) { animation-duration: .8s; animation-delay: .25s; }
+@keyframes eq { from { height: 3px; } to { height: 14px; } }
+
+#lang-badge {
+  margin-left: auto; padding: 3px 10px; border-radius: 20px;
+  background: var(--accent-light); color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .4px;
+}
+
+#chat-card { flex: 1; overflow: hidden; display: flex; flex-direction: column; position: relative; }
+
+#chat-window {
+  flex: 1; overflow-y: auto; padding: 24px;
+  display: flex; flex-direction: column; gap: 16px; scroll-behavior: smooth;
+}
+
+#welcome-screen {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; text-align: center; padding: 32px; gap: 16px;
+}
+.welcome-icon {
+  width: 72px; height: 72px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 32px; box-shadow: var(--shadow-lg); margin-bottom: 8px;
+}
+.welcome-title { font-size: 24px; font-weight: 700; color: var(--text); }
+.welcome-sub { font-size: 15px; color: var(--muted); max-width: 360px; line-height: 1.6; }
+.welcome-steps { display: flex; flex-direction: column; gap: 10px; max-width: 300px; width: 100%; margin-top: 8px; }
+.step-item {
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+  background: var(--card-bg); border-radius: var(--radius-sm); border: 1px solid var(--border); text-align: left;
+}
+.step-num {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent-light); color: var(--accent);
+  font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.step-text { font-size: 13px; color: var(--text2); }
+
+.bubble-row { display: flex; gap: 10px; align-items: flex-end; }
+.bubble-row.user { flex-direction: row-reverse; }
+
+.bubble-avatar {
+  width: 30px; height: 30px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+  display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0;
+}
+.bubble-row.user .bubble-avatar { background: #E5E7EB; }
+
+.bubble {
+  max-width: 65%; padding: 11px 15px; border-radius: 16px;
+  font-size: 14px; line-height: 1.6; color: var(--text); box-shadow: var(--shadow-sm);
+}
+.bubble-row.agent .bubble { background: var(--card-bg); border-bottom-left-radius: 4px; border: 1px solid var(--border); }
+.bubble-row.user  .bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+.bubble-row.error .bubble { background: #FEF2F2; border: 1px solid #FECACA; color: var(--danger); }
+
+.bubble-time { font-size: 10px; color: var(--muted); margin-top: 3px; padding: 0 4px; text-align: right; }
+.bubble-row.user .bubble-time { text-align: left; }
+
+.interrupted-tag {
+  display: inline-block; font-size: 10px; background: #FFF3CD; color: #92400E;
+  border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: middle;
+}
+
+.retry-btn {
+  display: block; margin-top: 8px; padding: 5px 12px;
+  border: 1px solid var(--danger); border-radius: 6px; background: transparent;
+  color: var(--danger); font-size: 12px; cursor: pointer; transition: all .15s;
+}
+.retry-btn:hover { background: var(--danger); color: #fff; }
+
+#thinking-indicator { display: none; padding: 4px 0; }
+#thinking-indicator.visible { display: flex; }
+
+.thinking-dots {
+  display: flex; align-items: center; gap: 4px;
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 14px; padding: 10px 14px; box-shadow: var(--shadow-sm);
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent2); animation: thinking-bounce .9s ease-in-out infinite; }
+.dot:nth-child(2) { animation-delay: .15s; }
+.dot:nth-child(3) { animation-delay: .30s; }
+@keyframes thinking-bounce { 0%,80%,100% { transform: scale(.6); opacity: .5; } 40% { transform: scale(1); opacity: 1; } }
+
+#listening-overlay {
+  display: none; position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
+  background: rgba(255,255,255,.96); border: 1px solid var(--border); border-radius: 28px;
+  padding: 10px 20px; box-shadow: var(--shadow-lg); align-items: center; gap: 10px;
+  z-index: 20; backdrop-filter: blur(8px);
+}
+#listening-overlay.visible { display: flex; }
+
+.listen-bars { display: flex; align-items: center; gap: 2px; height: 20px; }
+.l-bar { width: 3px; border-radius: 2px; background: var(--danger); animation: listen-eq .6s ease-in-out infinite alternate; }
+.l-bar:nth-child(1) { animation-duration: .5s; }
+.l-bar:nth-child(2) { animation-duration: .8s; animation-delay: .1s; }
+.l-bar:nth-child(3) { animation-duration: .6s; animation-delay: .2s; }
+.l-bar:nth-child(4) { animation-duration: .9s; animation-delay: .05s; }
+.l-bar:nth-child(5) { animation-duration: .7s; animation-delay: .15s; }
+@keyframes listen-eq { from { height: 4px; } to { height: 18px; } }
+.listen-label { font-size: 13px; font-weight: 600; color: var(--danger); }
+
+#input-area {
+  background: var(--card-bg); border-top: 1px solid var(--border);
+  padding: 12px 20px; display: flex; align-items: center; gap: 10px;
+}
+
+#text-input {
+  flex: 1; padding: 10px 14px; border: 1px solid var(--border); border-radius: 22px;
+  font-size: 14px; color: var(--text); background: var(--bg); outline: none;
+  resize: none; height: 42px; transition: border-color .15s; font-family: inherit;
+}
+#text-input:focus { border-color: var(--accent); }
+#text-input::placeholder { color: var(--muted); }
+
+#mic-btn {
+  width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--border);
+  background: var(--card-bg); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all .15s; flex-shrink: 0;
+}
+#mic-btn:hover { border-color: var(--accent); background: var(--accent-light); }
+#mic-btn.recording { background: var(--danger); border-color: var(--danger); }
+#mic-btn.recording:hover { background: #DC2626; }
+
+#mic-icon { color: var(--text2); }
+#stop-icon { color: #fff; display: none; }
+#mic-btn.recording #mic-icon { display: none; }
+#mic-btn.recording #stop-icon { display: block; }
+
+#send-btn {
+  width: 42px; height: 42px; border-radius: 50%; border: none;
+  background: var(--accent); color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s, transform .1s; flex-shrink: 0;
+}
+#send-btn:hover { background: #4a4ac5; }
+#send-btn:active { transform: scale(.95); }
+
+#mic-hint { font-size: 11px; color: var(--muted); text-align: center; padding: 0 20px 6px; }
+#waveform { display: none; }
+
+/* ── EVAL MODAL ─────────────────────────────────────────── */
+#eval-modal {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.4); z-index: 100;
+  align-items: center; justify-content: center; backdrop-filter: blur(4px);
+}
+#eval-modal.visible { display: flex; }
+
+.eval-card {
+  background: var(--card-bg); border-radius: 16px; box-shadow: var(--shadow-lg);
+  width: 540px; max-width: 95vw; max-height: 80vh; overflow-y: auto; padding: 28px;
+}
+.eval-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.eval-title { font-size: 18px; font-weight: 700; }
+.eval-close {
+  width: 32px; height: 32px; border-radius: 50%; border: none;
+  background: var(--bg); color: var(--muted); font-size: 18px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .15s;
+}
+.eval-close:hover { background: var(--border); color: var(--text); }
+
+#eval-scores { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+.score-card { padding: 14px; border-radius: var(--radius-sm); background: var(--bg); border: 1px solid var(--border); }
+.score-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.score-val { font-size: 24px; font-weight: 700; color: var(--accent); }
+
+#eval-content { font-size: 14px; line-height: 1.7; color: var(--text2); }
+#eval-content pre { white-space: pre-wrap; font-family: inherit; }
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+</style>
 </head>
 <body>
 
-<header>
-  <div class="logo">🛡️</div>
-  <div>
-    <h1>Insurance Sales Voice Agent</h1>
-    <small>Powered by Sarvam AI · saaras:v3 · bulbul:v3 · sarvam-m</small>
+<!-- ── SIDEBAR ─────────────────────────────────────────────── -->
+<aside id="sidebar">
+  <div class="sidebar-header">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
+          <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.35C17.25 22.15 21 17.25 21 12V7L12 2z" fill="rgba(255,255,255,.9)"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-name">PolicyAI</div>
+        <div class="brand-tagline">Insurance Sales Agent</div>
+      </div>
+    </div>
   </div>
-</header>
 
-<!-- Upload card -->
-<div class="card" id="upload-card">
-  <div class="card-title">1 — Upload Policy Document</div>
-
-  <div id="drop-zone" role="button" tabindex="0" aria-label="Upload PDF">
-    <div class="icon">📄</div>
-    <p>Drag & drop your <strong>insurance PDF</strong> here<br>or click to browse</p>
+  <div class="sidebar-section">
+    <div class="section-label">Policy Document</div>
+    <div id="drop-zone">
+      <svg width="28" height="28" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="display:block;margin:0 auto 6px">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+          d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+      </svg>
+      <div class="dz-title">Drop PDF here</div>
+      <div class="dz-sub">or click to browse</div>
+      <input type="file" id="file-input" accept=".pdf"/>
+    </div>
+    <button id="upload-btn" disabled>Upload &amp; Ingest</button>
+    <div id="status">Choose a PDF to get started</div>
   </div>
-  <input type="file" id="file-input" accept=".pdf" />
 
-  <div class="controls" style="margin-top:18px">
-    <div>
-      <div class="card-title" style="margin-bottom:8px">Choose your advisor</div>
-      <div class="character-group">
-        <div class="char-card selected" id="char-arjun" onclick="selectCharacter('arjun')">
-          <div class="avatar">👨‍💼</div>
-          <div class="info">
-            <div class="name">Arjun</div>
-            <div class="sub">Warm · Confident</div>
-          </div>
+  <div class="sidebar-section">
+    <div class="section-label">Choose Advisor</div>
+    <div class="char-grid">
+      <div class="char-card selected" id="char-arjun" onclick="selectChar('arjun',this)">
+        <div class="char-avatar">🧑‍💼</div>
+        <div class="char-info">
+          <div class="char-name">Arjun</div>
+          <div class="char-desc">Professional · Hindi / English</div>
         </div>
-        <div class="char-card" id="char-lalita" onclick="selectCharacter('lalita')">
-          <div class="avatar">👩‍💼</div>
-          <div class="info">
-            <div class="name">Lalita</div>
-            <div class="sub">Calm · Detailed</div>
+        <div class="char-check">
+          <svg width="10" height="10" fill="none" viewBox="0 0 12 12">
+            <path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </div>
+      </div>
+      <div class="char-card" id="char-lalita" onclick="selectChar('lalita',this)">
+        <div class="char-avatar">👩‍💼</div>
+        <div class="char-info">
+          <div class="char-name">Lalita</div>
+          <div class="char-desc">Empathetic · South Indian</div>
+        </div>
+        <div class="char-check">
+          <svg width="10" height="10" fill="none" viewBox="0 0 12 12" style="display:none">
+            <path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="session-panel">
+    <button id="start-btn" disabled>
+      <svg width="15" height="15" fill="none" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+        <path d="M10 8l6 4-6 4V8z" fill="currentColor"/>
+      </svg>
+      Start Session
+    </button>
+  </div>
+
+  <div class="sidebar-section" id="intel-section" style="display:none">
+    <div class="section-label">Live Intelligence</div>
+    <div class="intel-row">
+      <span class="intel-key">Stage</span>
+      <span id="stage-badge">GREETING</span>
+    </div>
+    <div class="intel-row">
+      <span class="intel-key">Language</span>
+      <span id="lang-badge-sidebar">English</span>
+    </div>
+    <button id="eval-btn" onclick="runEvaluation()">Evaluate Session</button>
+  </div>
+
+  <div class="sidebar-footer">Demo created by: Udbhav Singh</div>
+</aside>
+
+<!-- ── MAIN ────────────────────────────────────────────────── -->
+<main id="main">
+  <div id="agent-header">
+    <div id="agent-avatar-wrap">
+      <div class="speaking-ring"></div>
+      <div id="agent-avatar">🧑‍💼</div>
+    </div>
+    <div id="agent-header-info">
+      <div id="agent-name">Arjun</div>
+      <div class="agent-status-row">
+        <div id="status-dot" class="idle"></div>
+        <span id="agent-status-label">Ready to start</span>
+        <div id="speaking-bars">
+          <div class="eq-bar"></div><div class="eq-bar"></div>
+          <div class="eq-bar"></div><div class="eq-bar"></div>
+          <div class="eq-bar"></div>
+        </div>
+      </div>
+    </div>
+    <div id="lang-badge">EN</div>
+  </div>
+
+  <div id="chat-card">
+    <div id="welcome-screen">
+      <div class="welcome-icon">🛡️</div>
+      <div class="welcome-title">Welcome to PolicyAI</div>
+      <div class="welcome-sub">Your AI-powered insurance advisor. Upload a policy document and start a voice conversation.</div>
+      <div class="welcome-steps">
+        <div class="step-item"><div class="step-num">1</div><div class="step-text">Upload a policy PDF in the sidebar</div></div>
+        <div class="step-item"><div class="step-num">2</div><div class="step-text">Choose your advisor persona</div></div>
+        <div class="step-item"><div class="step-num">3</div><div class="step-text">Click <strong>Start Session</strong> to begin</div></div>
+      </div>
+    </div>
+
+    <div id="chat-window" style="display:none">
+      <div id="thinking-indicator">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="bubble-avatar" style="width:30px;height:30px;font-size:14px" id="thinking-avatar">🧑‍💼</div>
+          <div class="thinking-dots">
+            <div class="dot"></div><div class="dot"></div><div class="dot"></div>
           </div>
         </div>
       </div>
     </div>
 
-    <button class="btn btn-primary" id="upload-btn" onclick="uploadPDF()" disabled
-            style="margin-left:auto">
-      Upload &amp; Start
+    <div id="listening-overlay">
+      <div class="listen-bars">
+        <div class="l-bar"></div><div class="l-bar"></div><div class="l-bar"></div>
+        <div class="l-bar"></div><div class="l-bar"></div>
+      </div>
+      <span class="listen-label">Listening…</span>
+    </div>
+  </div>
+
+  <div id="input-area">
+    <textarea id="text-input" placeholder="Type a message or use the mic…" rows="1" disabled></textarea>
+    <button id="mic-btn" title="Click to speak" disabled>
+      <svg id="mic-icon" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/>
+      </svg>
+      <svg id="stop-icon" width="16" height="16" fill="currentColor" viewBox="0 0 24 24">
+        <rect x="4" y="4" width="16" height="16" rx="3"/>
+      </svg>
     </button>
-    <span id="status">No document</span>
+    <button id="send-btn" title="Send" disabled>
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z"/>
+      </svg>
+    </button>
   </div>
-</div>
+  <div id="mic-hint">Start a session to begin talking</div>
+  <div id="waveform"></div>
+</main>
 
-<!-- Chat card -->
-<div class="card" id="chat-card" style="display:none">
-  <div class="chat-header">
-    <div class="agent-pill">
-      <span id="agent-avatar">👨‍💼</span>
-      <span id="agent-name">Arjun</span>
+<!-- ── EVAL MODAL ─────────────────────────────────────────── -->
+<div id="eval-modal">
+  <div class="eval-card">
+    <div class="eval-header">
+      <div class="eval-title">Session Evaluation</div>
+      <button class="eval-close" onclick="closeEval()">×</button>
     </div>
-    <div class="lang-badge" id="lang-badge">en-IN</div>
-    <div style="flex:1"></div>
-    <button class="btn btn-outline" style="font-size:.8rem;padding:6px 14px"
-            onclick="openEvaluation()">📊 Evaluate</button>
-  </div>
-
-  <div id="chat-window" role="log" aria-live="polite"></div>
-
-  <div id="waveform" aria-hidden="true">
-    <div class="bar"></div><div class="bar"></div><div class="bar"></div>
-    <div class="bar"></div><div class="bar"></div>
-    <span style="margin-left:8px;font-size:.8rem;color:var(--red)">Recording… click mic to stop</span>
-  </div>
-
-  <div class="input-row">
-    <textarea id="text-input" rows="1" placeholder="Type a message…"
-              aria-label="Message input"
-              onkeydown="handleKey(event)"
-              oninput="autoResize(this)"></textarea>
-    <button id="mic-btn" title="Click to start/stop recording" onclick="toggleRecording()">🎤</button>
-    <button class="btn btn-primary" id="send-btn" onclick="sendText()">Send</button>
-  </div>
-  <div id="mic-hint">Click 🎤 to speak · language auto-detected</div>
-</div>
-
-<!-- Evaluation modal -->
-<div class="modal-backdrop" id="eval-modal" role="dialog"
-     aria-modal="true" aria-labelledby="eval-title">
-  <div class="modal">
-    <h2 id="eval-title">📊 Conversation Evaluation</h2>
-    <div class="eval-scores" id="eval-scores"></div>
-    <pre id="eval-content">Generating evaluation…</pre>
-    <div class="modal-footer">
-      <button class="btn btn-outline" onclick="closeEvaluation()">Close</button>
-    </div>
+    <div id="eval-scores"></div>
+    <div id="eval-content"></div>
   </div>
 </div>
-
-<footer>
-  Built for <a href="https://sarvam.ai" target="_blank">Sarvam AI</a> technical assignment ·
-  <a href="/docs" target="_blank">API docs</a>
-</footer>
 
 <script>
-const API = '';
-let sessionId      = null;
-let characterId    = 'arjun';
-let agentName      = 'Arjun';
-let detectedLang   = 'en-IN';
-let mediaRec       = null;
-let audioChunks    = [];
-let isSending      = false;
-let isRecording    = false;
-let lastUserText   = null;    // tracks last user turn for retry
-let currentWs      = null;    // active voice pipeline WebSocket (for barge-in)
-let currentAudioEl = null;    // currently playing Audio element (for barge-in)
-let activeAudioQueue = [];    // ref to voicePipeline's queue (cleared on barge-in)
-
-// ── Upload ──────────────────────────────────────────────────────────
-const dropZone  = document.getElementById('drop-zone');
-const fileInput = document.getElementById('file-input');
-const uploadBtn = document.getElementById('upload-btn');
-
-dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('keydown', e => e.key === 'Enter' && fileInput.click());
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-dropZone.addEventListener('drop', e => {
-  e.preventDefault(); dropZone.classList.remove('drag-over');
-  const f = e.dataTransfer.files[0];
-  if (f) handleFileSelect(f);
-});
-fileInput.addEventListener('change', () => {
-  if (fileInput.files[0]) handleFileSelect(fileInput.files[0]);
-});
-
-function handleFileSelect(file) {
-  if (!file.name.toLowerCase().endsWith('.pdf')) {
-    setStatus('error', 'Only PDF files accepted'); return;
-  }
-  dropZone.querySelector('p').innerHTML =
-    `📄 <strong>${file.name}</strong> (${(file.size/1024).toFixed(1)} KB)`;
-  uploadBtn.disabled = false;
-  uploadBtn._file = file;
-}
-
-function selectCharacter(id) {
-  characterId = id;
-  document.getElementById('char-arjun').classList.toggle('selected', id === 'arjun');
-  document.getElementById('char-lalita').classList.toggle('selected', id === 'lalita');
-}
-
-async function uploadPDF() {
-  const file = uploadBtn._file;
-  if (!file) return;
-  setStatus('loading', 'Uploading…');
-  uploadBtn.disabled = true;
-
-  const fd = new FormData();
-  fd.append('file', file);
-  fd.append('character', characterId);
-
-  let jobId;
-  try {
-    const res = await fetch(`${API}/upload`, { method: 'POST', body: fd });
-    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
-    jobId = (await res.json()).job_id;
-  } catch (err) {
-    setStatus('error', err.message); uploadBtn.disabled = false; return;
-  }
-
-  setStatus('loading', 'Ingesting…');
-  try {
-    const result = await pollIngestion(jobId);
-    sessionId = result.session_id;
-    setStatus('ready', `${result.chunk_count} chunks ready`);
-    showChatUI();
-    // Send opener message (no LLM call — uses character's fixed opener line)
-    const openerRes = await fetch(`${API}/chat`, {
-      method: 'POST',
-      body: (() => { const fd = new FormData(); fd.append('session_id', sessionId);
-        fd.append('message', '__opener__'); fd.append('stream', 'false'); return fd; })()
-    });
-    if (openerRes.ok) {
-      const data = await openerRes.json();
-      appendMsg('agent', data.reply);
-      await speakText(data.reply);
-    }
-  } catch (err) {
-    setStatus('error', err.message); uploadBtn.disabled = false;
-  }
-}
-
-async function pollIngestion(jobId, interval = 2000, maxWait = 180000) {
-  const deadline = Date.now() + maxWait;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, interval));
-    const res = await fetch(`${API}/status/${jobId}`);
-    if (!res.ok) throw new Error('Status check failed');
-    const data = await res.json();
-    if (data.status === 'done')   return data;
-    if (data.status === 'failed') throw new Error(data.error || 'Ingestion failed');
-  }
-  throw new Error('Ingestion timed out');
-}
-
-function setStatus(cls, txt) {
-  const el = document.getElementById('status');
-  el.className = cls; el.textContent = txt;
-}
-
-function showChatUI() {
-  const avatars = { arjun: '👨‍💼', lalita: '👩‍💼' };
-  const names   = { arjun: 'Arjun', lalita: 'Lalita' };
-  agentName = names[characterId];
-  document.getElementById('agent-avatar').textContent = avatars[characterId];
-  document.getElementById('agent-name').textContent   = agentName;
-  document.getElementById('chat-card').style.display = 'block';
-  document.getElementById('chat-card').scrollIntoView({ behavior: 'smooth' });
-}
-
-// ── Chat — text ─────────────────────────────────────────────────────
-function handleKey(e) {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); }
-}
-
-function autoResize(el) {
-  el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
-}
-
-async function sendText() {
-  const input = document.getElementById('text-input');
-  const msg = input.value.trim();
-  if (!msg || !sessionId || isSending) return;
-  input.value = ''; input.style.height = 'auto';
-  appendMsg('user', msg);
-  await sendMessage(msg);
-}
-
-async function sendMessage(userText) {
-  if (isSending) return;
-  isSending = true;
-  lastUserText = userText;
-  document.getElementById('send-btn').disabled = true;
-
-  const fd = new FormData();
-  fd.append('session_id', sessionId);
-  fd.append('message', userText);
-  fd.append('stream', 'false');
-
-  const agentBubble = appendMsg('agent', '', true);
-  try {
-    const res = await fetch(`${API}/chat`, { method: 'POST', body: fd });
-    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
-    const data = await res.json();
-    agentBubble.querySelector('.body').textContent = data.reply;
-    agentBubble.classList.remove('streaming');
-    if (data.language) updateLangBadge(data.language);
-    if (data.reply) await speakText(data.reply, data.language);
-  } catch (err) {
-    showBubbleError(agentBubble, err.message);
-  } finally {
-    isSending = false;
-    document.getElementById('send-btn').disabled = false;
-  }
-}
-
 const LANG_NAMES = {
-  'en-IN': 'English', 'hi-IN': 'Hindi',   'ta-IN': 'Tamil',
-  'te-IN': 'Telugu',  'kn-IN': 'Kannada', 'ml-IN': 'Malayalam',
-  'mr-IN': 'Marathi', 'bn-IN': 'Bengali', 'gu-IN': 'Gujarati',
-  'pa-IN': 'Punjabi',
+  "en-IN":"English","hi-IN":"Hindi","ta-IN":"Tamil","te-IN":"Telugu",
+  "kn-IN":"Kannada","ml-IN":"Malayalam","mr-IN":"Marathi","bn-IN":"Bengali",
+  "gu-IN":"Gujarati","pa-IN":"Punjabi"
+};
+const CHAR_INFO = {
+  arjun:  { emoji: "🧑‍💼", name: "Arjun" },
+  lalita: { emoji: "👩‍💼", name: "Lalita" },
 };
 
-function updateLangBadge(lang) {
-  if (lang) {
-    detectedLang = lang;
-    document.getElementById('lang-badge').textContent = LANG_NAMES[lang] || lang;
-  }
-}
+let sessionId = null;
+let selectedChar = "arjun";
+let pollTimer = null;
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
+let currentWs = null;
+let currentAudioEl = null;
+let activeAudioQueue = [];
+let lastMessageText = "";
 
-// ── Barge-in: stop agent mid-turn ───────────────────────────────────
-function interruptAgent() {
-  // Stop the currently playing audio element
-  if (currentAudioEl) {
-    currentAudioEl.pause();
-    currentAudioEl.src = '';
-    currentAudioEl = null;
-  }
-  // Discard any queued audio blobs not yet played
-  activeAudioQueue.length = 0;
-  // Close the active pipeline WebSocket — triggers server-side record_turn()
-  if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-    currentWs.close();
-    currentWs = null;
-  }
-}
-
-// ── TTS (REST fallback — used only for the opener line) ─────────────
-async function speakText(text, lang) {
-  if (!text || !sessionId) return;
-  const url = `${API}/speak?text=${encodeURIComponent(text)}&session_id=${sessionId}`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return;
-    const blob = await res.blob();
-    const aud = new Audio(URL.createObjectURL(blob));
-    currentAudioEl = aud;
-    aud.onended = () => { currentAudioEl = null; };
-    await aud.play().catch(() => { currentAudioEl = null; });
-  } catch (_) { currentAudioEl = null; }
-}
-
-// ── Voice recording ─────────────────────────────────────────────────
-async function toggleRecording() {
-  if (isRecording) {
-    await stopRecording();
+// ── State helpers ────────────────────────────────────────────
+function setSpeakingState(on) {
+  const wrap = document.getElementById("agent-avatar-wrap");
+  const dot  = document.getElementById("status-dot");
+  const lbl  = document.getElementById("agent-status-label");
+  const bars = document.getElementById("speaking-bars");
+  if (on) {
+    wrap.classList.add("speaking");
+    dot.className = "speaking";
+    lbl.textContent = "Speaking…";
+    bars.style.display = "flex";
   } else {
-    await startRecording();
+    wrap.classList.remove("speaking");
+    bars.style.display = "none";
   }
 }
 
-async function startRecording() {
-  // Barge-in: stop whatever the agent is doing before we start listening
+function setThinkingState(on) {
+  const dot = document.getElementById("status-dot");
+  const lbl = document.getElementById("agent-status-label");
+  const ind = document.getElementById("thinking-indicator");
+  if (on) {
+    dot.className = "thinking";
+    lbl.textContent = "Thinking…";
+    ind.classList.add("visible");
+    scrollBottom();
+  } else {
+    ind.classList.remove("visible");
+  }
+}
+
+function setListeningState(on) {
+  const dot = document.getElementById("status-dot");
+  const lbl = document.getElementById("agent-status-label");
+  const ov  = document.getElementById("listening-overlay");
+  const btn = document.getElementById("mic-btn");
+  if (on) {
+    dot.className = "listening";
+    lbl.textContent = "Listening…";
+    ov.classList.add("visible");
+    btn.classList.add("recording");
+  } else {
+    ov.classList.remove("visible");
+    btn.classList.remove("recording");
+  }
+}
+
+function setIdleState(label) {
+  setSpeakingState(false);
+  setThinkingState(false);
+  setListeningState(false);
+  document.getElementById("status-dot").className = "online";
+  document.getElementById("agent-status-label").textContent = label || "Online";
+}
+
+function updateStageBadge(stage) {
+  const el = document.getElementById("stage-badge");
+  if (el) el.textContent = stage || "GREETING";
+}
+
+function updateLangBadge(code) {
+  const name = LANG_NAMES[code] || "English";
+  document.getElementById("lang-badge").textContent = name.slice(0,2).toUpperCase();
+  document.getElementById("lang-badge-sidebar").textContent = name;
+}
+
+// ── Character select ─────────────────────────────────────────
+function selectChar(id, el) {
+  if (sessionId) return;
+  selectedChar = id;
+  document.querySelectorAll(".char-card").forEach(c => {
+    c.classList.remove("selected");
+    const svg = c.querySelector(".char-check svg");
+    if (svg) svg.style.display = "none";
+  });
+  el.classList.add("selected");
+  const svg = el.querySelector(".char-check svg");
+  if (svg) svg.style.display = "block";
+  const info = CHAR_INFO[id];
+  document.getElementById("agent-avatar").textContent = info.emoji;
+  document.getElementById("agent-name").textContent = info.name;
+  const ta = document.getElementById("thinking-avatar");
+  if (ta) ta.textContent = info.emoji;
+}
+
+// ── File upload ──────────────────────────────────────────────
+const dropZone  = document.getElementById("drop-zone");
+const fileInput = document.getElementById("file-input");
+const uploadBtn = document.getElementById("upload-btn");
+
+dropZone.addEventListener("click", () => fileInput.click());
+dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("dragover"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+dropZone.addEventListener("drop", e => {
+  e.preventDefault(); dropZone.classList.remove("dragover");
+  const f = e.dataTransfer.files[0];
+  if (f && f.name.toLowerCase().endsWith(".pdf")) { fileInput._file = f; onFileSelected(f); }
+});
+fileInput.addEventListener("change", () => { if (fileInput.files[0]) onFileSelected(fileInput.files[0]); });
+
+function onFileSelected(f) {
+  dropZone.querySelector(".dz-title").textContent = f.name;
+  dropZone.querySelector(".dz-sub").textContent = (f.size / 1024).toFixed(0) + " KB";
+  uploadBtn.disabled = false;
+  setStatus("Ready to upload", "");
+}
+
+uploadBtn.addEventListener("click", async () => {
+  const file = fileInput.files[0] || fileInput._file;
+  if (!file) return;
+  uploadBtn.disabled = true;
+  setStatus("Uploading…", "");
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("character", selectedChar);
+  try {
+    const r = await fetch("/upload", { method: "POST", body: fd });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || "Upload failed");
+    pollJob(j.job_id);
+  } catch(e) {
+    setStatus("Upload failed: " + e.message, "err");
+    uploadBtn.disabled = false;
+  }
+});
+
+function pollJob(jobId) {
+  setStatus("Ingesting PDF…", "");
+  pollTimer = setInterval(async () => {
+    try {
+      const r = await fetch("/status/" + jobId);
+      const j = await r.json();
+      if (j.status === "done") {
+        clearInterval(pollTimer);
+        sessionId = j.session_id;
+        setStatus("✓ Ready — " + j.chunk_count + " pages", "ok");
+        document.getElementById("start-btn").disabled = false;
+        document.getElementById("intel-section").style.display = "block";
+        document.getElementById("eval-btn").style.display = "block";
+      } else if (j.status === "failed") {
+        clearInterval(pollTimer);
+        setStatus("Ingestion failed: " + j.error, "err");
+        uploadBtn.disabled = false;
+      }
+    } catch {}
+  }, 1500);
+}
+
+function setStatus(msg, cls) {
+  const el = document.getElementById("status");
+  el.textContent = msg; el.className = cls;
+}
+
+// ── Start session ────────────────────────────────────────────
+document.getElementById("start-btn").addEventListener("click", async () => {
+  if (!sessionId) return;
+  document.getElementById("start-btn").disabled = true;
+  document.querySelectorAll(".char-card").forEach(c => c.style.pointerEvents = "none");
+
+  document.getElementById("welcome-screen").style.display = "none";
+  document.getElementById("chat-window").style.display = "flex";
+  document.getElementById("text-input").disabled = false;
+  document.getElementById("mic-btn").disabled = false;
+  document.getElementById("send-btn").disabled = false;
+  document.getElementById("mic-hint").textContent = "Press mic to speak · Enter to send";
+
+  document.getElementById("status-dot").className = "online";
+  document.getElementById("agent-status-label").textContent = "Online";
+
+  try {
+    const fd = new FormData();
+    fd.append("session_id", sessionId);
+    fd.append("message", "__opener__");
+    const r = await fetch("/chat", { method: "POST", body: fd });
+    const j = await r.json();
+    appendAgentBubble(j.reply);
+    updateStageBadge(j.stage);
+    updateLangBadge(j.language || "en-IN");
+    playTTS(j.reply);
+  } catch {
+    appendAgentBubble("Hello! I'm ready to help you with your insurance needs.");
+  }
+});
+
+// ── Send text ────────────────────────────────────────────────
+document.getElementById("send-btn").addEventListener("click", sendText);
+document.getElementById("text-input").addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendText(); }
+});
+
+async function sendText() {
+  const inp = document.getElementById("text-input");
+  const msg = inp.value.trim();
+  if (!msg || !sessionId) return;
+  inp.value = "";
+  appendUserBubble(msg);
+  await voicePipeline(msg, 0);
+}
+
+// ── Bubbles ──────────────────────────────────────────────────
+function appendAgentBubble(text) {
+  const win = document.getElementById("chat-window");
+  const row = document.createElement("div");
+  row.className = "bubble-row agent";
+  const info = CHAR_INFO[selectedChar];
+  row.innerHTML = `
+    <div class="bubble-avatar">${info.emoji}</div>
+    <div>
+      <div class="bubble">${escHtml(text)}</div>
+      <div class="bubble-time">${timeNow()}</div>
+    </div>`;
+  win.insertBefore(row, document.getElementById("thinking-indicator"));
+  scrollBottom();
+  return row;
+}
+
+function appendAgentBubbleStreaming() {
+  const win = document.getElementById("chat-window");
+  const row = document.createElement("div");
+  row.className = "bubble-row agent";
+  const info = CHAR_INFO[selectedChar];
+  row.innerHTML = `
+    <div class="bubble-avatar">${info.emoji}</div>
+    <div>
+      <div class="bubble" id="streaming-bubble"></div>
+      <div class="bubble-time">${timeNow()}</div>
+    </div>`;
+  win.insertBefore(row, document.getElementById("thinking-indicator"));
+  scrollBottom();
+  return row;
+}
+
+function appendUserBubble(text) {
+  const win = document.getElementById("chat-window");
+  const row = document.createElement("div");
+  row.className = "bubble-row user";
+  row.innerHTML = `
+    <div>
+      <div class="bubble">${escHtml(text)}</div>
+      <div class="bubble-time">${timeNow()}</div>
+    </div>
+    <div class="bubble-avatar" style="background:#E5E7EB;color:#374151">👤</div>`;
+  win.insertBefore(row, document.getElementById("thinking-indicator"));
+  scrollBottom();
+}
+
+function showBubbleError(message) {
+  setThinkingState(false);
+  setSpeakingState(false);
+  const win = document.getElementById("chat-window");
+  const row = document.createElement("div");
+  row.className = "bubble-row error";
+  row.innerHTML = `
+    <div class="bubble-avatar" style="background:#FEF2F2">⚠️</div>
+    <div>
+      <div class="bubble">${escHtml(message)}
+        <button class="retry-btn" onclick="retryLast()">Retry</button>
+      </div>
+    </div>`;
+  win.insertBefore(row, document.getElementById("thinking-indicator"));
+  scrollBottom();
+  setIdleState("Error — tap retry");
+}
+
+function retryLast() {
+  if (lastMessageText) voicePipeline(lastMessageText, 0);
+}
+
+function scrollBottom() { const w = document.getElementById("chat-window"); w.scrollTop = w.scrollHeight; }
+function escHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function timeNow() { return new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}); }
+
+// ── WebSocket pipeline ───────────────────────────────────────
+async function voicePipeline(message, sttLatencyMs) {
+  if (!sessionId) return;
+  lastMessageText = message;
+  interruptAgent();
+  setThinkingState(true);
+
+  const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${wsProto}//${location.host}/ws/chat`);
+  currentWs = ws;
+  ws.binaryType = "arraybuffer";
+
+  let streamBubble = null;
+  let streamText = "";
+  let audioBlobs = [];
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ session_id: sessionId, message, stt_latency_ms: sttLatencyMs }));
+  };
+
+  ws.onmessage = async (evt) => {
+    if (typeof evt.data === "string") {
+      let msg;
+      try { msg = JSON.parse(evt.data); } catch { return; }
+
+      if (msg.type === "sentence") {
+        setThinkingState(false);
+        setSpeakingState(true);
+        if (!streamBubble) {
+          streamBubble = appendAgentBubbleStreaming();
+          streamText = "";
+        } else {
+          streamText += " ";
+        }
+        streamText += msg.text;
+        const el = document.getElementById("streaming-bubble");
+        if (el) el.textContent = streamText;
+        scrollBottom();
+
+      } else if (msg.type === "audio_end") {
+        if (audioBlobs.length) {
+          const blob = new Blob(audioBlobs, { type: "audio/wav" });
+          audioBlobs = [];
+          queueAudio(blob);
+        }
+
+      } else if (msg.type === "done") {
+        updateStageBadge(msg.stage);
+        updateLangBadge(msg.language || "en-IN");
+        if (streamBubble) { streamBubble.removeAttribute("id"); streamBubble = null; }
+
+      } else if (msg.type === "error") {
+        showBubbleError(msg.message || "An error occurred.");
+      }
+    } else {
+      audioBlobs.push(new Uint8Array(evt.data));
+    }
+  };
+
+  ws.onclose = () => { currentWs = null; if (!currentAudioEl) setIdleState("Online"); };
+  ws.onerror = () => showBubbleError("Connection error. Please try again.");
+}
+
+// ── Audio queue ──────────────────────────────────────────────
+function queueAudio(blob) {
+  activeAudioQueue.push(blob);
+  if (activeAudioQueue.length === 1) playNextAudio();
+}
+
+function playNextAudio() {
+  if (!activeAudioQueue.length) {
+    currentAudioEl = null;
+    setSpeakingState(false);
+    setIdleState("Online");
+    return;
+  }
+  const blob = activeAudioQueue[0];
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  currentAudioEl = audio;
+  audio.onended = () => { URL.revokeObjectURL(url); activeAudioQueue.shift(); currentAudioEl = null; playNextAudio(); };
+  audio.onerror  = () => { activeAudioQueue.shift(); currentAudioEl = null; playNextAudio(); };
+  audio.play().catch(() => {});
+}
+
+function interruptAgent() {
+  if (currentWs) { try { currentWs.close(); } catch {} currentWs = null; }
+  if (currentAudioEl) { currentAudioEl.pause(); currentAudioEl = null; }
+  activeAudioQueue = [];
+  setSpeakingState(false);
+  setThinkingState(false);
+}
+
+function playTTS(text) {
+  if (!text || !sessionId) return;
+  const url = `/speak?text=${encodeURIComponent(text)}&session_id=${sessionId}`;
+  const audio = new Audio(url);
+  currentAudioEl = audio;
+  setSpeakingState(true);
+  audio.onended = () => { currentAudioEl = null; setSpeakingState(false); setIdleState("Online"); };
+  audio.onerror = () => { currentAudioEl = null; setSpeakingState(false); setIdleState("Online"); };
+  audio.play().catch(() => {});
+}
+
+// ── Microphone ───────────────────────────────────────────────
+document.getElementById("mic-btn").addEventListener("click", toggleMic);
+
+async function toggleMic() {
+  if (!sessionId) return;
+  if (isRecording) { stopRecording(); return; }
   interruptAgent();
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRec = new MediaRecorder(stream);
+    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
     audioChunks = [];
-    mediaRec.ondataavailable = e => audioChunks.push(e.data);
-    mediaRec.start();
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(audioChunks, { type: "audio/webm" });
+      await handleAudioBlob(blob);
+    };
+    mediaRecorder.start();
     isRecording = true;
-    document.getElementById('mic-btn').classList.add('recording');
-    document.getElementById('waveform').classList.add('active');
-    document.getElementById('mic-hint').textContent = 'Click 🎤 again to stop recording';
-  } catch (err) {
-    appendMsg('agent', `⚠️ Microphone access denied: ${err.message}`);
+    setListeningState(true);
+  } catch {
+    setIdleState("Mic blocked");
   }
 }
 
-async function stopRecording() {
-  if (!mediaRec) return;
-  mediaRec.stop();
-  mediaRec.stream.getTracks().forEach(t => t.stop());
-  await new Promise(r => (mediaRec.onstop = r));
-  mediaRec = null;
-  isRecording = false;
-  document.getElementById('mic-btn').classList.remove('recording');
-  document.getElementById('waveform').classList.remove('active');
-  document.getElementById('mic-hint').textContent = 'Click 🎤 to speak · language auto-detected';
-
-  const blob = new Blob(audioChunks, { type: 'audio/webm' });
-  audioChunks = [];
-  if (blob.size < 1000) return;
-  await transcribeAndSend(blob);
+function stopRecording() {
+  if (mediaRecorder && isRecording) {
+    isRecording = false;
+    setListeningState(false);
+    mediaRecorder.stop();
+  }
 }
 
-async function transcribeAndSend(blob) {
-  setStatus('loading', 'Transcribing…');
-  const sttStart = Date.now();
+async function handleAudioBlob(blob) {
+  setThinkingState(true);
+  document.getElementById("agent-status-label").textContent = "Transcribing…";
+  const t0 = Date.now();
   const fd = new FormData();
-  fd.append('audio', blob, 'recording.webm');
-  if (sessionId) fd.append('session_id', sessionId);
-
+  fd.append("audio", blob, "audio.webm");
+  fd.append("session_id", sessionId || "");
   try {
-    const res = await fetch(`${API}/transcribe`, { method: 'POST', body: fd });
-    if (!res.ok) throw new Error((await res.json()).detail);
-    const data = await res.json();
-    const sttMs = Date.now() - sttStart;
-    setStatus('ready', 'Ready');
+    const r = await fetch("/transcribe", { method: "POST", body: fd });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || "STT failed");
+    const transcript = j.transcript?.trim();
+    if (!transcript) { setIdleState("Online"); return; }
+    appendUserBubble(transcript);
+    updateLangBadge(j.language_code || "en-IN");
+    await voicePipeline(transcript, Date.now() - t0);
+  } catch(e) {
+    showBubbleError("Transcription failed: " + e.message);
+  }
+}
 
-    if (data.transcript && data.transcript.trim()) {
-      appendMsg('user', data.transcript);
-      updateLangBadge(data.language_code);
-      await voicePipeline(data.transcript, sttMs);
+// ── Evaluation ───────────────────────────────────────────────
+async function runEvaluation() {
+  if (!sessionId) return;
+  const btn = document.getElementById("eval-btn");
+  btn.textContent = "Evaluating…"; btn.disabled = true;
+  try {
+    const fd = new FormData();
+    fd.append("session_id", sessionId);
+    const r = await fetch("/evaluate", { method: "POST", body: fd });
+    const j = await r.json();
+    showEvalModal(j);
+  } catch(e) {
+    alert("Evaluation failed: " + e.message);
+  } finally {
+    btn.textContent = "Evaluate Session"; btn.disabled = false;
+  }
+}
+
+function showEvalModal(data) {
+  const scores = document.getElementById("eval-scores");
+  const content = document.getElementById("eval-content");
+  scores.innerHTML = "";
+  if (data.scores) {
+    for (const [k, v] of Object.entries(data.scores)) {
+      scores.innerHTML += `<div class="score-card"><div class="score-label">${escHtml(k)}</div><div class="score-val">${escHtml(String(v))}</div></div>`;
     }
-  } catch (err) {
-    setStatus('error', 'STT failed — try again');
-    appendMsg('agent', `⚠️ Could not transcribe audio: ${err.message}`);
   }
+  const txt = data.evaluation || data.summary || JSON.stringify(data, null, 2);
+  content.innerHTML = "<pre>" + escHtml(txt) + "</pre>";
+  document.getElementById("eval-modal").classList.add("visible");
 }
 
-// ── WebSocket voice pipeline ─────────────────────────────────────────
-// Replaces the old two-fetch pattern (POST /chat + GET /speak).
-// The server streams LLM tokens, splits them into sentences, and sends
-// TTS audio for each sentence as binary frames. The client plays them
-// in order as they arrive — first audio lands ~2.5s after STT.
-async function voicePipeline(userText, sttMs) {
-  if (isSending) return;
-  isSending = true;
-  lastUserText = userText;
-  document.getElementById('send-btn').disabled = true;
-
-  const agentBubble = appendMsg('agent', '', true);
-  let agentText  = '';
-  let receivedDone = false;
-
-  // Sequential audio playback queue: play blobs one at a time, in order.
-  const audioQueue  = [];
-  activeAudioQueue  = audioQueue;   // expose for barge-in interruption
-  let   isPlaying   = false;
-  let   pendingChunks = [];
-
-  function playNext() {
-    if (isPlaying || audioQueue.length === 0) return;
-    isPlaying = true;
-    const blob = audioQueue.shift();
-    const url  = URL.createObjectURL(blob);
-    const aud  = new Audio(url);
-    currentAudioEl = aud;
-    aud.onended = () => {
-      URL.revokeObjectURL(url);
-      currentAudioEl = null;
-      isPlaying = false;
-      playNext();
-    };
-    aud.play().catch(() => { currentAudioEl = null; isPlaying = false; playNext(); });
-  }
-
-  return new Promise((resolve) => {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${location.host}/ws/chat`);
-    ws.binaryType = 'arraybuffer';
-    currentWs = ws;
-
-    ws.onopen = () => {
-      ws.send(JSON.stringify({
-        session_id:     sessionId,
-        message:        userText,
-        stt_latency_ms: sttMs,
-      }));
-    };
-
-    ws.onmessage = (event) => {
-      if (event.data instanceof ArrayBuffer) {
-        pendingChunks.push(event.data);
-        return;
-      }
-
-      const msg = JSON.parse(event.data);
-
-      if (msg.type === 'sentence') {
-        agentText += (agentText ? ' ' : '') + msg.text;
-        agentBubble.querySelector('.body').textContent = agentText;
-        agentBubble.classList.remove('streaming');
-        pendingChunks = [];
-
-      } else if (msg.type === 'audio_end') {
-        if (pendingChunks.length > 0) {
-          const blob = new Blob(pendingChunks, { type: 'audio/wav' });
-          audioQueue.push(blob);
-          pendingChunks = [];
-          playNext();
-        }
-
-      } else if (msg.type === 'done') {
-        receivedDone = true;
-        if (msg.language) updateLangBadge(msg.language);
-        ws.close();
-
-      } else if (msg.type === 'error') {
-        showBubbleError(agentBubble, msg.message);
-        ws.close();
-      }
-    };
-
-    ws.onerror = () => {
-      showBubbleError(agentBubble, 'Connection error — please try again.');
-      resolve();
-    };
-
-    ws.onclose = () => {
-      if (currentWs === ws) currentWs = null;
-      // If the pipeline was cut before 'done' arrived and there's partial text,
-      // mark the bubble so the conversation log is accurate.
-      if (!receivedDone && agentText) {
-        const tag = document.createElement('span');
-        tag.className = 'interrupted-tag';
-        tag.textContent = ' [interrupted]';
-        agentBubble.querySelector('.body').appendChild(tag);
-        agentBubble.classList.remove('streaming');
-      }
-      isSending = false;
-      document.getElementById('send-btn').disabled = false;
-      resolve();
-    };
-  });
-}
-
-function showBubbleError(bubble, message) {
-  bubble.classList.remove('streaming');
-  const body = bubble.querySelector('.body');
-  body.textContent = `⚠️ ${message}`;
-  const btn = document.createElement('button');
-  btn.className = 'retry-btn';
-  btn.textContent = '↻ Retry';
-  btn.onclick = () => {
-    bubble.remove();
-    if (lastUserText) voicePipeline(lastUserText, 0);
-  };
-  body.appendChild(document.createElement('br'));
-  body.appendChild(btn);
-}
-
-// ── Evaluation modal ─────────────────────────────────────────────────
-async function openEvaluation() {
-  document.getElementById('eval-scores').innerHTML = '';
-  document.getElementById('eval-content').textContent = 'Generating evaluation…';
-  document.getElementById('eval-modal').classList.add('open');
-
-  const fd = new FormData();
-  fd.append('session_id', sessionId);
-  try {
-    const res = await fetch(`${API}/evaluate`, { method: 'POST', body: fd });
-    const data = await res.json();
-
-    // Score chips
-    const scores = document.getElementById('eval-scores');
-    const chips = [
-      ['Lead Score', data.lead_score + '/100'],
-      ['Interest',   data.interest_level + '/100'],
-      ['Close Readiness', data.close_readiness + '/100'],
-      ['Intent',     data.buying_intent],
-      ['Turns',      data.turn_count],
-      ['Objections', `${data.objections_raised} raised · ${data.objections_resolved} resolved`],
-    ];
-    chips.forEach(([label, val]) => {
-      const chip = document.createElement('div');
-      chip.className = 'score-chip';
-      chip.innerHTML = `${label}: <span>${val}</span>`;
-      scores.appendChild(chip);
-    });
-
-    document.getElementById('eval-content').textContent =
-      data.evaluation || 'No evaluation text returned.';
-  } catch (err) {
-    document.getElementById('eval-content').textContent = `Error: ${err.message}`;
-  }
-}
-
-function closeEvaluation() {
-  document.getElementById('eval-modal').classList.remove('open');
-}
-
-document.getElementById('eval-modal').addEventListener('click', function(e) {
-  if (e.target === this) closeEvaluation();
-});
-
-// ── DOM helpers ─────────────────────────────────────────────────────
-function appendMsg(role, text, streaming = false) {
-  const win = document.getElementById('chat-window');
-  const div = document.createElement('div');
-  div.className = `msg ${role}${streaming ? ' streaming' : ''}`;
-  const senderLabel = role === 'user' ? '🧑 You' : `${agentName}`;
-  div.innerHTML = `<div class="sender">${senderLabel}</div><div class="body"></div>`;
-  div.querySelector('.body').textContent = text;
-  win.appendChild(div);
-  win.scrollTop = win.scrollHeight;
-  return div;
-}
+function closeEval() { document.getElementById("eval-modal").classList.remove("visible"); }
+document.getElementById("eval-modal").addEventListener("click", function(e) { if (e.target === this) closeEval(); });
 </script>
 </body>
 </html>
