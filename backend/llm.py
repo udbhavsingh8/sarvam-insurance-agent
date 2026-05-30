@@ -29,7 +29,7 @@ class LLMConfig:
 
 SARVAM_M = LLMConfig(
     model_id="sarvam-m",
-    max_tokens=1800,  # prompt trimmed to ~3000t; think block needs ~800t, response ~300t; total ~5100t < 7192
+    max_tokens=2400,  # think block can use ~1800t; response ~400t; input ~3200t; total ~5600t < 7192
     temperature=0.7,
     strip_think_tags=True,
 )

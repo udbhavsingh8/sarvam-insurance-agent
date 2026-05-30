@@ -114,11 +114,14 @@ class AgentSession:
         )
 
         try:
+            import re as _re
             raw = self._llm.complete([
                 {"role": "system", "content": prompt_text},
                 {"role": "user", "content": "start"},
             ])
-            return raw.strip()
+            # Strip any [Name], [Customer], [Client] placeholders the LLM might emit
+            raw = _re.sub(r'\[(?:Name|Customer|Client|User)\]', '', raw, flags=_re.IGNORECASE).strip()
+            return raw
         except Exception:
             # Fallback: build a simple but still contextual opener from metadata
             company_part = f" from {company_name}" if company_name else ""
@@ -292,8 +295,8 @@ class AgentSession:
         # sarvam-m context window is 7192 tokens. Budget: ~5800 for system prompt,
         # ~600 for max_tokens output, leaving headroom for history turns.
         # sales_brief is the biggest variable — cap it so the prompt never overflows.
-        BRIEF_CHAR_LIMIT = 1800    # ~780 tokens at sarvam tokenizer rate
-        DOC_CONTEXT_CHAR_LIMIT = 800   # ~350 tokens
+        BRIEF_CHAR_LIMIT = 1400    # ~610 tokens at sarvam tokenizer rate
+        DOC_CONTEXT_CHAR_LIMIT = 700   # ~305 tokens
 
         brief = self.store.sales_brief or "No product profile available."
         if len(brief) > BRIEF_CHAR_LIMIT:
@@ -339,6 +342,13 @@ class AgentSession:
                     "Address it, then make a single ask."
                 )
 
+        # Only inject deflection playbook when objections are likely to arise
+        active_deflection = (
+            DEFLECTION_PLAYBOOK
+            if self.memory.stage in ("EXPLAIN", "CLOSE", "HANDLE")
+            else ""
+        )
+
         system = MAIN_SYSTEM_PROMPT.format(
             name=self.character["name"],
             persona=self.character["persona"],
@@ -355,13 +365,13 @@ class AgentSession:
             stage_intent=stage_intent,
             voice_rules=VOICE_RULES,
             advisor_rules=ADVISOR_RULES,
-            deflection_playbook=DEFLECTION_PLAYBOOK,
+            deflection_playbook=active_deflection,
             meta_tag_instruction=META_TAG_INSTRUCTION,
         )
 
-        # Build history from turn_log (user/assistant pairs only), capped to last 6 turns
-        # Each turn is ~150 chars avg; 6 turns ≈ 900 chars ≈ 390 tokens at sarvam rate
-        MAX_HISTORY_TURNS = 6
+        # Build history from turn_log (user/assistant pairs only), capped to last 4 turns
+        # Each turn is ~150 chars avg; 4 turns ≈ 600 chars ≈ 260 tokens at sarvam rate
+        MAX_HISTORY_TURNS = 4
         relevant_log = self.memory.turn_log[-(MAX_HISTORY_TURNS * 2):]
         history: list[dict] = []
         for entry in relevant_log:
