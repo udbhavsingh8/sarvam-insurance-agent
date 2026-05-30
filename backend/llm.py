@@ -29,7 +29,7 @@ class LLMConfig:
 
 SARVAM_M = LLMConfig(
     model_id="sarvam-m",
-    max_tokens=900,   # think block ~400t + response ~200t; prompt trimmed to ~4500t so total ~5400t < 7192
+    max_tokens=1800,  # prompt trimmed to ~3000t; think block needs ~800t, response ~300t; total ~5100t < 7192
     temperature=0.7,
     strip_think_tags=True,
 )
@@ -87,7 +87,10 @@ class LLMClient:
                     max_tokens=self.config.max_tokens,
                 )
                 raw = resp.choices[0].message.content or ""
-                return _strip_think(raw) if self.config.strip_think_tags else raw.strip()
+                result = _strip_think(raw) if self.config.strip_think_tags else raw.strip()
+                if not result:
+                    raise LLMError("sarvam-m returned empty content after think block")
+                return result
             except LLMError:
                 raise
             except Exception as exc:
@@ -131,6 +134,7 @@ class LLMClient:
         # sarvam-m: buffer tokens until </think> marker, then stream content
         buffer: list[str] = []
         past_think = False
+        yielded_any = False
 
         try:
             for chunk in sdk_stream:
@@ -142,6 +146,7 @@ class LLMClient:
 
                 if past_think:
                     yield delta
+                    yielded_any = True
                     continue
 
                 buffer.append(delta)
@@ -152,7 +157,12 @@ class LLMClient:
                     buffer = []
                     if after.strip():
                         yield after
+                        yielded_any = True
         except LLMError:
             raise
         except Exception as exc:
             raise LLMError(str(exc)) from exc
+
+        # Raise if the model produced no usable content after the think block.
+        if not yielded_any:
+            raise LLMError("sarvam-m produced no content after think block")

@@ -98,6 +98,12 @@ class AgentSession:
 
         clean, analysis = parse_meta_tag(raw)
 
+        # If the model produced only a META tag with no spoken text, use fallback
+        if not clean.strip() and not llm_error:
+            clean = _FALLBACK
+            llm_error = True
+            error_detail = "empty response after META tag strip"
+
         self.memory.turn_count += 1
         self.memory.log_turn("user", user_text)
         self.memory.log_turn("assistant", clean)
@@ -210,8 +216,8 @@ class AgentSession:
         # sarvam-m context window is 7192 tokens. Budget: ~5800 for system prompt,
         # ~600 for max_tokens output, leaving headroom for history turns.
         # sales_brief is the biggest variable — cap it so the prompt never overflows.
-        BRIEF_CHAR_LIMIT = 3200    # ~800 tokens
-        DOC_CONTEXT_CHAR_LIMIT = 1200  # ~300 tokens
+        BRIEF_CHAR_LIMIT = 1800    # ~780 tokens at sarvam tokenizer rate
+        DOC_CONTEXT_CHAR_LIMIT = 800   # ~350 tokens
 
         brief = self.store.sales_brief or "No product profile available."
         if len(brief) > BRIEF_CHAR_LIMIT:

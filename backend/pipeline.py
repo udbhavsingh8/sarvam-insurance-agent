@@ -157,8 +157,18 @@ async def run_voice_pipeline(
             error_detail=error_detail if error_detail else ("interrupted" if interrupted else None),
         )
 
-    if interrupted or llm_error:
-        # Don't attempt to send on a broken socket.
+    if interrupted:
+        return
+
+    if llm_error:
+        # Send a visible error to the client — better than silent nothing.
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "message": "I'm having a connection issue right now. Could you try again?",
+            }))
+        except Exception:
+            pass
         return
 
     await websocket.send_text(json.dumps({
