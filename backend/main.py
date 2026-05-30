@@ -155,11 +155,11 @@ async def chat(
     session = _get_session(session_id)
     lock = _session_locks.get(session_id)
 
-    # Special opener token — return character's fixed opening line, no LLM call
+    # Special opener token — generate a contextual opening line from the document
     if message.strip() == "__opener__":
         loop = asyncio.get_event_loop()
-        opener_text = await loop.run_in_executor(None, session.opener)
-        return JSONResponse({"reply": opener_text, "language": session.language, "stage": "GREETING"})
+        opener_text = await loop.run_in_executor(None, session.generate_opener)
+        return JSONResponse({"reply": opener_text, "language": session.language, "stage": "CONNECT"})
 
     if not message.strip():
         raise HTTPException(status_code=400, detail="message must not be empty.")

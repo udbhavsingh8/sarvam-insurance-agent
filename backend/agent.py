@@ -17,7 +17,7 @@ from errors import LLMError
 from llm import LLMClient
 from memory import SessionMemory
 from metrics import TurnMetrics, log_session, log_turn
-from prompts import ADVISOR_RULES, DEFLECTION_PLAYBOOK, MAIN_SYSTEM_PROMPT, META_TAG_INSTRUCTION, STAGE_INTENTS, VOICE_RULES, language_display_name
+from prompts import ADVISOR_RULES, DEFLECTION_PLAYBOOK, MAIN_SYSTEM_PROMPT, META_TAG_INSTRUCTION, OPENER_PROMPT, STAGE_INTENTS, VOICE_RULES, language_display_name
 from rag import DocumentStore
 
 _FALLBACK = "I'm having a connection issue right now. Could you give me a moment and try again?"
@@ -39,9 +39,42 @@ class AgentSession:
 
     # ── Public interface ───────────────────────────────────────────────
 
-    def opener(self) -> str:
-        """Return the character's opening line (no LLM call needed)."""
-        return self.character["opener"]
+    def generate_opener(self) -> str:
+        """
+        Generate a contextual opening line using the product document metadata.
+        Makes one lightweight LLM call — result is not cached (session is new each time).
+        Falls back to a document-aware template if the LLM call fails.
+        """
+        meta = self.store.metadata
+        plan_name = meta.get("plan_name", "this plan")
+        company_name = meta.get("company_name", "")
+        one_line_pitch = meta.get("one_line_pitch", "it provides financial protection for you and your family")
+        language_name = language_display_name(self.memory.detected_language)
+
+        prompt_text = OPENER_PROMPT.format(
+            name=self.character["name"],
+            persona=self.character["persona"],
+            style_guide=self.character["style_guide"],
+            language_name=language_name,
+            plan_name=plan_name,
+            company_name=company_name if company_name else "the insurer",
+            one_line_pitch=one_line_pitch,
+        )
+
+        try:
+            raw = self._llm.complete([
+                {"role": "system", "content": prompt_text},
+                {"role": "user", "content": "start"},
+            ])
+            return raw.strip()
+        except Exception:
+            # Fallback: build a simple but still contextual opener from metadata
+            company_part = f" from {company_name}" if company_name else ""
+            return (
+                f"Hi, I'm {self.character['name']}. "
+                f"I'm here to talk to you about {plan_name}{company_part} — {one_line_pitch}. "
+                f"Have you come across this plan before, or would you like me to give you a quick overview?"
+            )
 
     def chat(self, user_text: str) -> str:
         """
