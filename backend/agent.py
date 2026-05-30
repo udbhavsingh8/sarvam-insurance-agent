@@ -185,14 +185,29 @@ class AgentSession:
         """
         Stream agent response tokens. Caller must collect the full text
         to update history — call record_turn() after streaming is done.
+        On think-block overflow, retries with a slimmed prompt transparently.
         """
+        from errors import LLMError
+        from llm import _slim_messages
+
         messages = self._build_messages(user_text)
         self._pending_user_text = user_text
         self._stream_parts: list[str] = []
 
-        for token in self._llm.stream(messages):
-            self._stream_parts.append(token)
-            yield token
+        try:
+            for token in self._llm.stream(messages):
+                self._stream_parts.append(token)
+                yield token
+        except LLMError as exc:
+            if "no content after think block" in str(exc):
+                # Retry with stripped prompt — clear any partial stream state
+                self._stream_parts = []
+                slim = _slim_messages(messages)
+                for token in self._llm.stream(slim):
+                    self._stream_parts.append(token)
+                    yield token
+            else:
+                raise
 
     def record_turn(
         self,
