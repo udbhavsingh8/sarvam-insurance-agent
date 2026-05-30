@@ -211,15 +211,128 @@ def _detect_plan_type(text: str, meta_type: str) -> str:
 
 def _generate_product_profile(text: str, meta: dict) -> str:
     """
-    Build a structured advisor product profile directly from the document text.
-    Uses keyword extraction — no LLM calls, no API dependency, instant and reliable.
-    The profile is structured for the advisor to study before a sales call.
+    Generate advisor product brief. Tries LLM first for clean language;
+    falls back to keyword extraction if the API call fails.
+    """
+    brief = _generate_brief_via_llm(text, meta)
+    if brief:
+        return brief
+    return _generate_brief_via_keywords(text, meta)
+
+
+def _generate_brief_via_llm(text: str, meta: dict) -> str:
+    """
+    One LLM call that rewrites raw document sections into clean advisor language.
+    Returns empty string on any failure so the caller can fall back gracefully.
+    """
+    import os
+    from sarvamai import SarvamAI
+
+    key = os.getenv("SARVAM_API_KEY")
+    if not key:
+        return ""
+
+    plan_name = meta.get("plan_name", "this plan")
+    company = meta.get("company_name", "the insurer")
+    plan_type = _detect_plan_type(text, meta.get("plan_type", "other"))
+
+    # Build a focused digest from keyword-matched sections — ~3000 chars total.
+    # This is more useful than raw first-N-chars because it spans the whole document.
+    sections = {
+        "Overview": text[:800].strip(),
+        "Coverage and variants": _extract_section(text,
+            ["sum assured", "coverage", "plan option", "variant", "benefit amount"], 500),
+        "Premiums": _extract_section(text,
+            ["premium", "annual", "daily", "frequency", "loading", "non-smoker"], 500),
+        "Eligibility and policy term": _extract_section(text,
+            ["entry age", "minimum age", "maximum age", "policy term", "years"], 400),
+        "Death benefit": _extract_section(text,
+            ["death benefit", "nominee", "sum assured on death", "lump sum"], 400),
+        "Maturity benefit": _extract_section(text,
+            ["maturity benefit", "survival benefit", "return of premium", "money back"], 300),
+        "Riders": _extract_section(text,
+            ["rider", "add-on", "waiver", "accidental", "critical illness"], 300),
+        "Tax": _extract_section(text,
+            ["80c", "10(10d)", "80d", "tax benefit", "deduction"], 200),
+        "Exclusions": _extract_section(text,
+            ["exclusion", "not covered", "not payable", "suicide", "pre-existing"], 300),
+    }
+
+    digest = "\n\n".join(
+        f"[{label}]\n{content}"
+        for label, content in sections.items()
+        if content and content != "Refer to policy document for full details."
+    )
+
+    prompt = f"""\
+You are a senior insurance sales trainer writing a product brief for a sales advisor.
+
+Study the document sections below and rewrite them as a clean advisor cheat-sheet.
+The advisor will read this before every sales call — write in plain spoken English, not PDF language.
+
+RULES:
+- Plain English only. No markdown, no asterisks, no backtick characters.
+- Replace backtick-R or grave-accent-R with the rupee symbol where it appears.
+- Use the section labels exactly as shown below.
+- Each section: 2-4 sentences maximum. Be specific — use actual numbers from the document.
+- If a detail is absent from the document, write: not specified in document.
+- Total output must stay under 1600 characters.
+
+PLAN: {plan_name} | COMPANY: {company} | TYPE: {plan_type}
+
+[DOCUMENT SECTIONS]
+{digest}
+
+Write the brief using exactly these section labels (one blank line between sections):
+
+COVERAGE: what cover options exist, typical sum assured range, key variants
+PREMIUMS: what a typical customer pays; include a specific rupee example with age if available; translate to daily cost
+ELIGIBILITY: entry age range, policy term options, key health conditions that affect acceptance
+DEATH BENEFIT: how the nominee receives the payout, lump sum or income
+MATURITY BENEFIT: what the customer gets if they survive the term (write "nil for pure term plans" if none)
+RIDERS: optional add-ons available and what each covers in one phrase
+TAX BENEFITS: which Income Tax sections apply and what deduction the customer gets
+EXCLUSIONS: the two or three most important things this plan does not cover
+PITCH: one sentence — the strongest reason a customer in their 30s with dependents should consider this plan today\
+"""
+
+    try:
+        client = SarvamAI(api_subscription_key=key)
+        resp = client.chat.completions(
+            messages=[{"role": "user", "content": prompt}],
+            model="sarvam-m",
+            temperature=0.3,
+            max_tokens=1800,  # think block needs ~800t; brief needs ~700t; total ~1500t
+        )
+        raw = resp.choices[0].message.content or ""
+        # Strip closed think tags first
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+        # If think tag is still open (truncated), strip everything from <think> onward
+        if "<think>" in raw:
+            raw = raw[:raw.index("<think>")].strip()
+        if not raw or len(raw) < 200:
+            return ""
+
+        # Prepend the standard header so agent.py can always find plan identity
+        header = (
+            f"PLAN: {plan_name} | COMPANY: {company}\n"
+            f"TYPE: {plan_type.upper()}\n\n"
+        )
+        return header + raw
+
+    except Exception:
+        return ""
+
+
+def _generate_brief_via_keywords(text: str, meta: dict) -> str:
+    """
+    Keyword-based fallback brief — used when LLM is unavailable.
+    Produces raw but complete document sections.
     """
     plan_name = meta.get("plan_name", "this plan")
     company = meta.get("company_name", "the insurer")
     plan_type = _detect_plan_type(text, meta.get("plan_type", "other"))
 
-    # Product type label
     type_labels = {
         "term": "Term Insurance (Pure Risk Life Cover)",
         "health": "Health Insurance",
@@ -229,62 +342,36 @@ def _generate_product_profile(text: str, meta: dict) -> str:
         "child": "Child Plan",
         "other": "Life Insurance Plan",
     }
-    product_type_label = type_labels.get(plan_type, "Life Insurance Plan")
-
-    # Extract relevant sections from document text
-    overview = text[:1200].strip()
 
     coverage_text = _extract_section(text,
         ["sum assured", "coverage", "cover", "benefit amount", "death benefit", "variants", "plan option"])
-
     premium_text = _extract_section(text,
         ["premium", "payment", "frequency", "annual", "monthly", "discount", "loading"])
-
     term_text = _extract_section(text,
         ["policy term", "entry age", "maximum age", "maturity age", "tenure", "years"])
-
     death_text = _extract_section(text,
         ["death benefit", "nominee", "death", "claim", "sum assured on death"])
-
     maturity_text = _extract_section(text,
         ["maturity benefit", "survival benefit", "maturity value", "money back", "return of premium"])
-
     riders_text = _extract_section(text,
         ["rider", "add-on", "optional", "additional cover", "waiver", "accidental"])
-
     tax_text = _extract_section(text,
         ["80c", "10(10d)", "80d", "tax", "section 10", "income tax", "deduction"])
-
     exclusions_text = _extract_section(text,
         ["exclusion", "not covered", "not payable", "suicide", "war", "pre-existing"])
 
-    eligibility_text = _extract_section(text,
-        ["entry age", "minimum age", "maximum age", "eligibility", "age at entry", "health"])
-
-    special_text = _extract_section(text,
-        ["special", "unique", "exclusive", "female", "women", "maternity", "return of premium",
-         "insta payment", "accelerated", "double", "bharosa"])
-
-    # Objection handling — generic but grounded in plan type
-    objection_text = _objection_handling_for_type(plan_type, plan_name)
-
-    profiling_q = _profiling_questions_for_type(plan_type)
-
     return (
-        f"PLAN: {plan_name} | COMPANY: {company}\n\n"
-        f"PRODUCT TYPE:\n{product_type_label}\n\n"
-        f"PRODUCT OVERVIEW (first section of document):\n{overview}\n\n"
-        f"COVERAGE AND SUM ASSURED:\n{coverage_text}\n\n"
-        f"PREMIUM STRUCTURE:\n{premium_text}\n\n"
-        f"POLICY TERM AND ELIGIBILITY:\n{term_text}\n{eligibility_text}\n\n"
-        f"DEATH BENEFIT:\n{death_text}\n\n"
-        f"MATURITY / SURVIVAL BENEFIT:\n{maturity_text}\n\n"
-        f"RIDERS AND ADD-ONS:\n{riders_text}\n\n"
-        f"TAX BENEFITS:\n{tax_text}\n\n"
-        f"KEY EXCLUSIONS:\n{exclusions_text}\n\n"
-        f"SPECIAL FEATURES:\n{special_text}\n\n"
-        f"OBJECTION HANDLING:\n{objection_text}\n\n"
-        f"CUSTOMER PROFILING QUESTIONS:\n{profiling_q}"
+        f"PLAN: {plan_name} | COMPANY: {company}\n"
+        f"TYPE: {type_labels.get(plan_type, 'Life Insurance Plan').upper()}\n\n"
+        f"COVERAGE: {coverage_text}\n\n"
+        f"PREMIUMS: {premium_text}\n\n"
+        f"ELIGIBILITY: {term_text}\n\n"
+        f"DEATH BENEFIT: {death_text}\n\n"
+        f"MATURITY BENEFIT: {maturity_text}\n\n"
+        f"RIDERS: {riders_text}\n\n"
+        f"TAX BENEFITS: {tax_text}\n\n"
+        f"EXCLUSIONS: {exclusions_text}\n\n"
+        f"OBJECTION HANDLING:\n{_objection_handling_for_type(plan_type, plan_name)}"
     )
 
 

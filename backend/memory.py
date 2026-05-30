@@ -11,6 +11,41 @@ EXPLAIN_SUBTOPICS = [
 ]
 
 
+def choose_explain_topics(plan_type: str, profile: "CustomerProfile") -> list[str]:
+    """
+    Return 3–4 most relevant EXPLAIN topics for this customer and plan type.
+    Replaces the fixed 8-topic curriculum with a profile-aware sequence.
+
+    Term plans never include maturity_benefit (there is none in a pure term plan).
+    Smokers get premium implications moved up — it's their biggest concern.
+    """
+    base: dict[str, list[str]] = {
+        "term":    ["coverage_and_sum_assured", "premium_and_daily_cost",
+                    "death_benefit_and_payout", "key_exclusions"],
+        "health":  ["coverage_and_sum_insured", "hospitalisation_and_claims",
+                    "exclusions_and_waiting_period", "tax_benefits"],
+        "ulip":    ["coverage_amount", "fund_options_and_risk",
+                    "charges_and_liquidity", "tax_benefits"],
+        "savings": ["coverage_amount", "maturity_benefit_and_corpus",
+                    "premium_and_payment_term", "tax_benefits"],
+        "pension": ["corpus_building_and_growth", "annuity_payout_options",
+                    "vesting_age_and_term", "tax_benefits"],
+        "child":   ["corpus_at_maturity", "premium_waiver_on_death",
+                    "policy_term_and_flexibility", "tax_benefits"],
+        "other":   ["coverage_amount", "key_benefits",
+                    "premium_structure", "exclusions"],
+    }
+
+    topics = list(base.get(plan_type, base["other"]))
+
+    # Profile-based reordering: smoker needs to understand premium impact first
+    if plan_type == "term" and profile.smoker:
+        topics = ["premium_and_daily_cost", "coverage_and_sum_assured",
+                  "death_benefit_and_payout", "key_exclusions"]
+
+    return topics
+
+
 @dataclass
 class CustomerProfile:
     """Collected customer information, built progressively during PROFILE stage."""
@@ -143,8 +178,11 @@ class SessionMemory:
     # ── Customer profile (built during PROFILE stage) ───────────────
     customer_profile: CustomerProfile = field(default_factory=CustomerProfile)
 
-    # ── Explanation progress (tracks which subtopic we're on in EXPLAIN) ──
+    # ── Explanation progress ────────────────────────────────────────────
     explain_subtopic_index: int = 0
+    # Dynamic topic list — set at EXPLAIN entry from plan_type + customer profile.
+    # Empty until first EXPLAIN turn; agent._build_messages() initializes it.
+    explain_topics: list[str] = field(default_factory=list)
 
     # ── Customer profile (built during DISCOVERY / QUALIFICATION) ───
     customer_name: Optional[str] = None

@@ -44,12 +44,12 @@ def _auto_advance_stage(memory: SessionMemory) -> None:
 
     if stage == "PROFILE" and memory.customer_profile.is_sufficient():
         memory.previous_stage = stage
-        memory.stage = "PERSONALIZE"
+        memory.stage = "EXPLAIN"   # skip PERSONALIZE — first EXPLAIN turn opens with profile restatement
         memory.turn_in_stage = 0
         return
 
     if stage == "PERSONALIZE":
-        # Always a single bridge turn — advance to EXPLAIN after it completes.
+        # Safety: if LLM somehow sets PERSONALIZE, immediately move to EXPLAIN.
         memory.previous_stage = stage
         memory.stage = "EXPLAIN"
         memory.turn_in_stage = 0
@@ -254,15 +254,29 @@ class AgentSession:
     # ── Internal ───────────────────────────────────────────────────────
 
     def _build_messages(self, user_text: str) -> list[dict]:
-        from memory import EXPLAIN_SUBTOPICS
-        explain_subtopic = EXPLAIN_SUBTOPICS[
-            min(self.memory.explain_subtopic_index, len(EXPLAIN_SUBTOPICS) - 1)
-        ]
-        explain_subtopic_line = (
-            f"EXPLAIN SUBTOPIC: {explain_subtopic.replace('_', ' ').title()} "
-            f"(subtopic {self.memory.explain_subtopic_index + 1} of {len(EXPLAIN_SUBTOPICS)})\n"
-            if self.memory.stage == "EXPLAIN" else ""
-        )
+        from memory import choose_explain_topics
+
+        # Lazily initialize the dynamic topic list on first EXPLAIN turn.
+        # Uses plan_type from document metadata + current customer profile.
+        if self.memory.stage == "EXPLAIN" and not self.memory.explain_topics:
+            plan_type = self.store.metadata.get("plan_type", "other")
+            self.memory.explain_topics = choose_explain_topics(
+                plan_type, self.memory.customer_profile
+            )
+
+        explain_subtopic_line = ""
+        if self.memory.stage == "EXPLAIN" and self.memory.explain_topics:
+            idx = min(self.memory.explain_subtopic_index, len(self.memory.explain_topics) - 1)
+            topic = self.memory.explain_topics[idx].replace("_", " ").title()
+            remaining = self.memory.explain_topics[idx + 1:]
+            remaining_str = (
+                " | Next: " + ", ".join(t.replace("_", " ") for t in remaining)
+                if remaining else " | Final topic"
+            )
+            explain_subtopic_line = (
+                f"EXPLAIN TOPIC NOW: {topic} "
+                f"(topic {idx + 1} of {len(self.memory.explain_topics)}{remaining_str})\n"
+            )
 
         # sarvam-m context window is 7192 tokens. Budget: ~5800 for system prompt,
         # ~600 for max_tokens output, leaving headroom for history turns.

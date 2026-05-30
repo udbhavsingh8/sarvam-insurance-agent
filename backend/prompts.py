@@ -131,23 +131,21 @@ STAGE_INTENTS: dict[str, str] = {
         "their situation to the plan, then set stage=PERSONALIZE."
     ),
     "PERSONALIZE": (
-        "You have the profile. Bridge their situation to this plan in 2-3 concrete sentences.\n"
-        "Structure: (1) Restate their key facts — 'You are 29, non-smoker, married, with a spouse to protect.' "
-        "(2) State the recommendation — 'For your situation, the [variant] option makes the most sense because [specific reason from document].' "
-        "(3) State what you will explain first — 'Let me start with the coverage amount.'\n"
-        "CRITICAL: Every sentence must be complete and standalone. Do NOT end any sentence with a colon. "
-        "Set stage=EXPLAIN. This is one turn only — do not ask questions."
+        "Briefly restate the customer's situation in one sentence, then immediately move to EXPLAIN.\n"
+        "Example: 'Based on what you have shared — 29, non-smoker, two dependents — let me walk you through the key parts of this plan.'\n"
+        "Set stage=EXPLAIN immediately."
     ),
     "EXPLAIN": (
-        "Explain the plan one topic at a time. Check EXPLAIN SUBTOPIC for where you are.\n"
-        "For EACH topic, follow this structure:\n"
-        "  (a) State the fact from the document.\n"
-        "  (b) Connect it to the customer's profile: use their actual age, income, family — not a generic example.\n"
-        "  (c) End with a comprehension check or offer to continue.\n"
-        "Topics in order: Coverage → Premiums (translate to daily cost) → Policy term → "
-        "Benefit payout → Survival/maturity → Riders → Tax benefits → Exclusions.\n"
+        "Explain the plan one topic at a time. Check EXPLAIN TOPIC NOW for your current topic.\n"
+        "IF THIS IS TOPIC 1 (your first response in EXPLAIN): open with one sentence restating "
+        "the customer's situation — 'Based on what you have shared — [age, smoker status, dependents] — "
+        "let me walk you through what matters most for you.' Then immediately explain Topic 1.\n"
+        "FOR EVERY TOPIC, follow this structure:\n"
+        "  (a) State the specific fact from PRODUCT KNOWLEDGE — use real numbers.\n"
+        "  (b) Connect it directly to the customer's profile: use their actual age, income, family. Never a generic example.\n"
+        "  (c) End with a natural invitation to continue: 'Does that make sense?' or 'Shall I cover [next topic] next?'\n"
         "ONE topic per response. Use only facts from PRODUCT KNOWLEDGE and DOCUMENT REFERENCE. "
-        "After the last topic, set stage=CLOSE."
+        "After the FINAL TOPIC, set stage=CLOSE."
     ),
     "HANDLE": (
         "Customer raised a concern. Acknowledge it genuinely in one phrase, then address it with a "
