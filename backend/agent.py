@@ -17,10 +17,51 @@ from errors import LLMError
 from llm import LLMClient
 from memory import SessionMemory
 from metrics import TurnMetrics, log_session, log_turn
+from profile_extractor import extract_profile_fields
 from prompts import ADVISOR_RULES, DEFLECTION_PLAYBOOK, MAIN_SYSTEM_PROMPT, META_TAG_INSTRUCTION, OPENER_PROMPT, STAGE_INTENTS, VOICE_RULES, language_display_name
 from rag import DocumentStore
 
 _FALLBACK = "I'm having a connection issue right now. Could you give me a moment and try again?"
+
+
+def _auto_advance_stage(memory: SessionMemory) -> None:
+    """
+    Python-controlled stage gating. Runs after every turn.
+
+    The LLM requests stage transitions via its META tag, but this function
+    has the final say. It prevents two classes of failure:
+      1. LLM stays stuck (never emits a transition tag) → Python advances when
+         objective conditions are met (profile complete, high close readiness).
+      2. LLM advances too early → Python blocks premature transitions.
+
+    Rules:
+      PROFILE → PERSONALIZE: only when profile.is_sufficient() is True.
+      PERSONALIZE → EXPLAIN: always after one turn (it is a one-turn bridge).
+      EXPLAIN → CLOSE: only when close_readiness >= 70 AND at least 3 EXPLAIN turns.
+      All other transitions (including INTRODUCE→PROFILE, QA, HANDLE) are LLM-driven.
+    """
+    stage = memory.stage
+
+    if stage == "PROFILE" and memory.customer_profile.is_sufficient():
+        memory.previous_stage = stage
+        memory.stage = "PERSONALIZE"
+        memory.turn_in_stage = 0
+        return
+
+    if stage == "PERSONALIZE":
+        # Always a single bridge turn — advance to EXPLAIN after it completes.
+        memory.previous_stage = stage
+        memory.stage = "EXPLAIN"
+        memory.turn_in_stage = 0
+        return
+
+    if stage == "EXPLAIN":
+        intel = memory.intelligence
+        if intel.close_readiness >= 70 and memory.turn_in_stage >= 3:
+            memory.previous_stage = stage
+            memory.stage = "CLOSE"
+            memory.turn_in_stage = 0
+            return
 
 
 class AgentSession:
@@ -86,6 +127,9 @@ class AgentSession:
         llm_error = False
         error_detail: str | None = None
 
+        # Extract profile fields from user text deterministically — before LLM call.
+        self.memory.customer_profile.apply_updates(extract_profile_fields(user_text))
+
         messages = self._build_messages(user_text)
         t_llm_start = time.time()
         try:
@@ -110,6 +154,8 @@ class AgentSession:
 
         if analysis and not llm_error:
             apply_analysis(self.memory, analysis, user_text)
+
+        _auto_advance_stage(self.memory)
 
         log_turn(TurnMetrics(
             session_id=self.session_id,
@@ -158,12 +204,17 @@ class AgentSession:
         clean, analysis = parse_meta_tag(raw)
 
         user_text = getattr(self, "_pending_user_text", "")
+        # Extract profile fields from user text (covers the streaming path)
+        if user_text:
+            self.memory.customer_profile.apply_updates(extract_profile_fields(user_text))
         self.memory.turn_count += 1
         self.memory.log_turn("user", user_text)
         self.memory.log_turn("assistant", clean)
 
         if analysis and not llm_error:
             apply_analysis(self.memory, analysis, user_text)
+
+        _auto_advance_stage(self.memory)
 
         log_turn(TurnMetrics(
             session_id=self.session_id,
@@ -223,7 +274,7 @@ class AgentSession:
         if len(brief) > BRIEF_CHAR_LIMIT:
             brief = brief[:BRIEF_CHAR_LIMIT] + "\n[... product profile truncated for brevity ...]"
 
-        raw_context = self.store.get_context(user_text, top_k=1)
+        raw_context = self.store.get_context(user_text, top_k=3)
         if len(raw_context) > DOC_CONTEXT_CHAR_LIMIT:
             raw_context = raw_context[:DOC_CONTEXT_CHAR_LIMIT]
 

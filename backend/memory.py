@@ -30,6 +30,33 @@ class CustomerProfile:
         key_fields = [self.age, self.gender, self.dependents, self.existing_coverage, self.financial_goal]
         return sum(1 for f in key_fields if f is not None) >= 4
 
+    def apply_updates(self, updates: dict) -> None:
+        """Apply a dict of profile fields extracted by profile_extractor."""
+        if "age" in updates and self.age is None:
+            self.age = updates["age"]
+            if "age" not in self.fields_collected:
+                self.fields_collected.append("age")
+        if "smoker" in updates and self.smoker is None:
+            self.smoker = updates["smoker"]
+            if "smoker" not in self.fields_collected:
+                self.fields_collected.append("smoker")
+        if "income_range" in updates and self.income_range is None:
+            self.income_range = updates["income_range"]
+            if "income_range" not in self.fields_collected:
+                self.fields_collected.append("income_range")
+        if "dependents" in updates and self.dependents is None:
+            self.dependents = updates["dependents"]
+            if "dependents" not in self.fields_collected:
+                self.fields_collected.append("dependents")
+        if "marital_status" in updates and self.marital_status is None:
+            self.marital_status = updates["marital_status"]
+            if "marital_status" not in self.fields_collected:
+                self.fields_collected.append("marital_status")
+        if "gender" in updates and self.gender is None:
+            self.gender = updates["gender"]
+            if "gender" not in self.fields_collected:
+                self.fields_collected.append("gender")
+
     def summary(self) -> str:
         if not self.fields_collected:
             return "No customer profile collected yet."

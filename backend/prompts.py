@@ -176,14 +176,17 @@ STAGE_INTENTS: dict[str, str] = {
 
 META_TAG_INSTRUCTION = """\
 After your spoken response, add this tag on a new line (never speak it):
-[META stage=STAGE interest_delta=N objection=TYPE emotional_state=STATE close_readiness_delta=N customer_age=N customer_gender=X customer_marital_status=X customer_dependents=N customer_smoker=X customer_existing_coverage=X customer_financial_goal=X customer_income_range=X]
+[META stage=STAGE interest_delta=N objection=TYPE emotional_state=STATE close_readiness_delta=N]
 
-Stage transitions: INTRODUCE→PROFILE (customer agrees) | PROFILE→PERSONALIZE (4+ fields) | PERSONALIZE→EXPLAIN (always) | EXPLAIN→CLOSE (all topics done) | any→QUESTION_ANSWER (customer asks) | any→HANDLE (objection raised)
-stage values: INTRODUCE|PROFILE|PERSONALIZE|EXPLAIN|HANDLE|CLOSE|QUESTION_ANSWER
-objection values: price|trust|timing|need|comparison|family|none
-emotional_state: curious|engaged|hesitant|resistant|anxious|satisfied
-customer_gender: male|female|other|empty  customer_marital_status: single|married|divorced|widowed|empty
-customer_existing_coverage: none|some|adequate|empty  customer_financial_goal: protection|savings|both|retirement|child|empty\
+Rules:
+- stage: the stage THIS response should move the conversation to
+- interest_delta: integer −10 to +10 based on customer engagement this turn
+- close_readiness_delta: integer −10 to +10 based on how close customer is to deciding
+- objection: price|trust|timing|need|comparison|family|none
+- emotional_state: curious|engaged|hesitant|resistant|anxious|satisfied
+
+Stage transitions: INTRODUCE→PROFILE (customer agrees) | PROFILE→PERSONALIZE (4+ fields) | PERSONALIZE→EXPLAIN (always) | EXPLAIN→CLOSE (all topics done) | any→QUESTION_ANSWER (customer asks a direct question) | any→HANDLE (objection raised)
+stage values: INTRODUCE|PROFILE|PERSONALIZE|EXPLAIN|HANDLE|CLOSE|QUESTION_ANSWER\
 """
 
 # ── Main system prompt template ────────────────────────────────────────
