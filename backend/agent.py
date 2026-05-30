@@ -246,8 +246,9 @@ class AgentSession:
             meta_tag_instruction=META_TAG_INSTRUCTION,
         )
 
-        # Build history from turn_log (user/assistant pairs only), capped to last 10 turns
-        MAX_HISTORY_TURNS = 10
+        # Build history from turn_log (user/assistant pairs only), capped to last 6 turns
+        # Each turn is ~150 chars avg; 6 turns ≈ 900 chars ≈ 390 tokens at sarvam rate
+        MAX_HISTORY_TURNS = 6
         relevant_log = self.memory.turn_log[-(MAX_HISTORY_TURNS * 2):]
         history: list[dict] = []
         for entry in relevant_log:

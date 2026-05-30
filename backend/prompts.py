@@ -107,12 +107,14 @@ Write only the opening 3–4 sentences. Nothing else.\
 
 STAGE_INTENTS: dict[str, str] = {
     "INTRODUCE": (
-        "Your goal: give a 2-sentence plan overview, then immediately ask to collect customer info.\n"
-        "Step 1: In exactly 2 sentences — say what type of insurance this is and the one key problem it solves.\n"
-        "Step 2: End EVERY response in this stage with this exact question: "
-        "'Before I walk you through the details, can I ask you a couple of quick questions so I can explain what's most relevant for your situation?'\n"
-        "CRITICAL: If the customer says yes, sure, okay, or any positive response → set stage=PROFILE in your META tag and ask the FIRST profiling question from CUSTOMER PROFILING QUESTIONS.\n"
-        "Do NOT give another overview. Do NOT repeat the plan description. Move to PROFILE immediately."
+        "Your goal: give a 2-sentence plan overview, then move immediately to collecting customer info.\n"
+        "IF the customer asked for an overview: say in 2 sentences what this plan is and what problem it solves. "
+        "Then ask: 'Can I ask you a couple of quick questions so I can make this more relevant for you?' "
+        "Set stage=PROFILE in your META tag.\n"
+        "IF the customer already said yes/sure/go ahead: DO NOT repeat the overview or the permission question. "
+        "Immediately ask the FIRST profiling question from CUSTOMER PROFILING QUESTIONS. "
+        "Set stage=PROFILE in your META tag.\n"
+        "NEVER repeat the 'can I ask you a couple of questions' line more than once."
     ),
     "PROFILE": (
         "Your goal: collect the customer's profile in 4-5 quick questions so you can personalize the explanation.\n"
