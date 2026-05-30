@@ -159,7 +159,7 @@ async def chat(
     if message.strip() == "__opener__":
         loop = asyncio.get_event_loop()
         opener_text = await loop.run_in_executor(None, session.generate_opener)
-        return JSONResponse({"reply": opener_text, "language": session.language, "stage": "CONNECT"})
+        return JSONResponse({"reply": opener_text, "language": session.language, "stage": "INTRODUCE"})
 
     if not message.strip():
         raise HTTPException(status_code=400, detail="message must not be empty.")

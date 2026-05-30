@@ -43,5 +43,5 @@ class DocumentStore:
             top = self._chunks[:top_k]
         return "\n\n---\n\n".join(top)
 
-    def get_context(self, query: str = "") -> str:
-        return self.retrieve(query) if query else self.retrieve("insurance policy benefits coverage")
+    def get_context(self, query: str = "", top_k: int = TOP_K) -> str:
+        return self.retrieve(query, top_k=top_k) if query else self.retrieve("insurance policy benefits coverage", top_k=top_k)

@@ -826,12 +826,13 @@ function appendAgentBubbleStreaming() {
   row.innerHTML = `
     <div class="bubble-avatar">${info.emoji}</div>
     <div>
-      <div class="bubble" id="streaming-bubble"></div>
+      <div class="bubble"></div>
       <div class="bubble-time">${timeNow()}</div>
     </div>`;
   win.insertBefore(row, document.getElementById("thinking-indicator"));
   scrollBottom();
-  return row;
+  // Return the inner bubble div directly — avoids stale getElementById across turns
+  return row.querySelector(".bubble");
 }
 
 function appendUserBubble(text) {
@@ -909,8 +910,7 @@ async function voicePipeline(message, sttLatencyMs) {
           streamText += " ";
         }
         streamText += msg.text;
-        const el = document.getElementById("streaming-bubble");
-        if (el) el.textContent = streamText;
+        streamBubble.textContent = streamText;
         scrollBottom();
 
       } else if (msg.type === "audio_end") {
@@ -923,7 +923,7 @@ async function voicePipeline(message, sttLatencyMs) {
       } else if (msg.type === "done") {
         updateStageBadge(msg.stage);
         updateLangBadge(msg.language || "en-IN");
-        if (streamBubble) { streamBubble.removeAttribute("id"); streamBubble = null; }
+        streamBubble = null;
 
       } else if (msg.type === "error") {
         showBubbleError(msg.message || "An error occurred.");

@@ -29,7 +29,8 @@ if TYPE_CHECKING:
 
 
 VALID_STAGES = {
-    "CONNECT", "QUALIFY", "PITCH", "HANDLE", "CLOSE", "QUESTION_ANSWER",
+    "INTRODUCE", "PROFILE", "PERSONALIZE", "EXPLAIN",
+    "HANDLE", "CLOSE", "QUESTION_ANSWER",
 }
 
 VALID_EMOTIONAL_STATES = {
@@ -45,6 +46,15 @@ class TurnAnalysis:
     objection_resolved: bool
     close_readiness_delta: int
     emotional_state: str = "curious"
+    # Customer profile fields extracted from this turn
+    customer_age: Optional[int] = None
+    customer_gender: Optional[str] = None
+    customer_marital_status: Optional[str] = None
+    customer_dependents: Optional[int] = None
+    customer_smoker: Optional[bool] = None
+    customer_existing_coverage: Optional[str] = None
+    customer_financial_goal: Optional[str] = None
+    customer_income_range: Optional[str] = None
 
 
 _META_PATTERN = re.compile(r'\[META([^\]]*)\]', re.IGNORECASE)
@@ -85,6 +95,26 @@ def parse_meta_tag(text: str) -> tuple[str, Optional[TurnAnalysis]]:
     raw_emotion = _extract(raw_tag, "emotional_state").lower()
     emotional_state = raw_emotion if raw_emotion in VALID_EMOTIONAL_STATES else "curious"
 
+    # Customer profile fields
+    def _opt_int(key: str) -> Optional[int]:
+        v = _extract(raw_tag, key)
+        try:
+            return int(v) if v and v not in ("", "empty") else None
+        except ValueError:
+            return None
+
+    def _opt_str(key: str) -> Optional[str]:
+        v = _extract(raw_tag, key)
+        return v if v and v not in ("", "empty") else None
+
+    def _opt_bool(key: str) -> Optional[bool]:
+        v = _extract(raw_tag, key).lower()
+        if v == "true":
+            return True
+        if v == "false":
+            return False
+        return None
+
     analysis = TurnAnalysis(
         stage=stage,
         interest_delta=_int_val(raw_tag, "interest_delta", 0),
@@ -92,6 +122,14 @@ def parse_meta_tag(text: str) -> tuple[str, Optional[TurnAnalysis]]:
         objection_resolved=_extract(raw_tag, "objection_resolved", "false").lower() == "true",
         close_readiness_delta=_int_val(raw_tag, "close_readiness_delta", 0),
         emotional_state=emotional_state,
+        customer_age=_opt_int("customer_age"),
+        customer_gender=_opt_str("customer_gender"),
+        customer_marital_status=_opt_str("customer_marital_status"),
+        customer_dependents=_opt_int("customer_dependents"),
+        customer_smoker=_opt_bool("customer_smoker"),
+        customer_existing_coverage=_opt_str("customer_existing_coverage"),
+        customer_financial_goal=_opt_str("customer_financial_goal"),
+        customer_income_range=_opt_str("customer_income_range"),
     )
     return clean, analysis
 
@@ -119,6 +157,47 @@ def apply_analysis(
     # Emotional state update
     if analysis.emotional_state:
         memory.emotional_state = analysis.emotional_state
+
+    # Customer profile updates — only overwrite if new value was extracted
+    cp = memory.customer_profile
+    if analysis.customer_age is not None:
+        cp.age = analysis.customer_age
+        if "age" not in cp.fields_collected:
+            cp.fields_collected.append("age")
+    if analysis.customer_gender:
+        cp.gender = analysis.customer_gender
+        if "gender" not in cp.fields_collected:
+            cp.fields_collected.append("gender")
+    if analysis.customer_marital_status:
+        cp.marital_status = analysis.customer_marital_status
+        if "marital_status" not in cp.fields_collected:
+            cp.fields_collected.append("marital_status")
+    if analysis.customer_dependents is not None:
+        cp.dependents = analysis.customer_dependents
+        if "dependents" not in cp.fields_collected:
+            cp.fields_collected.append("dependents")
+    if analysis.customer_smoker is not None:
+        cp.smoker = analysis.customer_smoker
+        if "smoker" not in cp.fields_collected:
+            cp.fields_collected.append("smoker")
+    if analysis.customer_existing_coverage:
+        cp.existing_coverage = analysis.customer_existing_coverage
+        if "existing_coverage" not in cp.fields_collected:
+            cp.fields_collected.append("existing_coverage")
+    if analysis.customer_financial_goal:
+        cp.financial_goal = analysis.customer_financial_goal
+        if "financial_goal" not in cp.fields_collected:
+            cp.fields_collected.append("financial_goal")
+    if analysis.customer_income_range:
+        cp.income_range = analysis.customer_income_range
+        if "income_range" not in cp.fields_collected:
+            cp.fields_collected.append("income_range")
+
+    # Advance EXPLAIN subtopic when stage is EXPLAIN and advisor moved forward
+    if memory.stage == "EXPLAIN" and analysis.stage == "EXPLAIN":
+        from memory import EXPLAIN_SUBTOPICS
+        if memory.explain_subtopic_index < len(EXPLAIN_SUBTOPICS) - 1:
+            memory.explain_subtopic_index += 1
 
     # Interest update
     intel.interest_level = max(0, min(100, intel.interest_level + analysis.interest_delta))

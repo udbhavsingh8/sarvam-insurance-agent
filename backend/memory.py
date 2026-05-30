@@ -4,6 +4,56 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
+EXPLAIN_SUBTOPICS = [
+    "coverage", "premiums", "policy_term",
+    "death_benefit", "maturity_benefit",
+    "riders", "tax_benefits", "exclusions",
+]
+
+
+@dataclass
+class CustomerProfile:
+    """Collected customer information, built progressively during PROFILE stage."""
+    age: Optional[int] = None
+    gender: Optional[str] = None          # male | female | other
+    marital_status: Optional[str] = None  # single | married | divorced | widowed
+    dependents: Optional[int] = None      # number of dependents
+    smoker: Optional[bool] = None
+    existing_coverage: Optional[str] = None   # none | some | adequate
+    financial_goal: Optional[str] = None  # protection | savings | both | retirement | child
+    income_range: Optional[str] = None    # monthly income bracket
+    health_conditions: Optional[str] = None   # none | pre-existing
+    fields_collected: list[str] = field(default_factory=list)
+
+    def is_sufficient(self) -> bool:
+        """True once at least 4 key fields are known."""
+        key_fields = [self.age, self.gender, self.dependents, self.existing_coverage, self.financial_goal]
+        return sum(1 for f in key_fields if f is not None) >= 4
+
+    def summary(self) -> str:
+        if not self.fields_collected:
+            return "No customer profile collected yet."
+        lines = []
+        if self.age is not None:
+            lines.append(f"Age: {self.age}")
+        if self.gender:
+            lines.append(f"Gender: {self.gender}")
+        if self.marital_status:
+            lines.append(f"Marital status: {self.marital_status}")
+        if self.dependents is not None:
+            lines.append(f"Dependents: {self.dependents}")
+        if self.smoker is not None:
+            lines.append(f"Smoker: {'yes' if self.smoker else 'no'}")
+        if self.existing_coverage:
+            lines.append(f"Existing coverage: {self.existing_coverage}")
+        if self.financial_goal:
+            lines.append(f"Financial goal: {self.financial_goal}")
+        if self.income_range:
+            lines.append(f"Income range: {self.income_range}")
+        if self.health_conditions:
+            lines.append(f"Health: {self.health_conditions}")
+        return "\n".join(lines)
+
 
 @dataclass
 class CustomerIntelligence:
@@ -54,13 +104,20 @@ class SessionMemory:
     _language_candidate_confidence: float = field(default=0.0, repr=False)
 
     # ── Sales stage machine ─────────────────────────────────────────
-    stage: str = "CONNECT"  # CONNECT | QUALIFY | PITCH | HANDLE | CLOSE | QUESTION_ANSWER
+    stage: str = "INTRODUCE"  # INTRODUCE|PROFILE|PERSONALIZE|EXPLAIN|HANDLE|CLOSE|QUESTION_ANSWER
+
     previous_stage: Optional[str] = None
     return_to_stage: Optional[str] = None   # set when entering QUESTION_ANSWER
     turn_in_stage: int = 0
 
     # ── Customer emotional state (updated every turn from META tag) ──
     emotional_state: str = "curious"  # curious | engaged | hesitant | resistant | anxious | satisfied
+
+    # ── Customer profile (built during PROFILE stage) ───────────────
+    customer_profile: CustomerProfile = field(default_factory=CustomerProfile)
+
+    # ── Explanation progress (tracks which subtopic we're on in EXPLAIN) ──
+    explain_subtopic_index: int = 0
 
     # ── Customer profile (built during DISCOVERY / QUALIFICATION) ───
     customer_name: Optional[str] = None
@@ -147,6 +204,11 @@ class SessionMemory:
 
         if self.intelligence.positive_signals:
             lines.append(f"Positive signals: {', '.join(self.intelligence.positive_signals[-2:])}")
+
+        # Customer profile
+        profile_summary = self.customer_profile.summary()
+        if profile_summary != "No customer profile collected yet.":
+            lines.append(f"Customer profile:\n{profile_summary}")
 
         lines.append(
             f"Interest: {self.intelligence.interest_level}/100  "
