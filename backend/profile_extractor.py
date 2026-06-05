@@ -22,7 +22,8 @@ def extract_profile_fields(text: str) -> dict:
     Parse user text and return a dict of any profile fields found.
     Only returns keys that were actually matched — callers must check presence.
 
-    Supported fields: age, smoker, income_range, dependents, marital_status, gender
+    Supported fields: age, smoker, income_range, dependents, marital_status, gender,
+                      years_of_support, existing_cover_lakh
     """
     t = text.lower()
     result: dict = {}
@@ -77,6 +78,16 @@ def extract_profile_fields(text: str) -> dict:
     cover = _extract_cover_override(t)
     if cover is not None:
         result["cover_amount_override_lakh"] = cover
+
+    # ── Years of support ──────────────────────────────────────────────────
+    years = _extract_years_of_support(t)
+    if years is not None:
+        result["years_of_support"] = years
+
+    # ── Existing cover ────────────────────────────────────────────────────
+    existing = _extract_existing_cover(t)
+    if existing is not None:
+        result["existing_cover_lakh"] = existing
 
     return result
 
@@ -147,9 +158,10 @@ def _extract_income(t: str) -> Optional[str]:
     # "15 lakhs" / "15 lakh" (standalone, likely annual) — skip if preceded by loan/liability words
     m = re.search(r"(\d+(?:\.\d+)?)\s*lakh(?:s)?", t_norm)
     if m:
-        start = max(0, m.start() - 30)
-        context = t_norm[start:m.start()]
-        if not re.search(r"loan|emi|debt|mortgage|liability|outstanding", context):
+        pre = t_norm[max(0, m.start() - 30):m.start()]
+        post = t_norm[m.end():m.end() + 30]
+        exclude = r"loan|emi|debt|mortgage|liability|outstanding|cover|insurance|policy|assured|employer|corporate|office|company|group"
+        if not re.search(exclude, pre) and not re.search(exclude, post):
             return f"{m.group(1)} lakh"
 
     # Monthly: "50,000 per month", "50k per month", "50000 monthly"
@@ -290,6 +302,81 @@ def _extract_liabilities(t: str) -> Optional[float]:
             if "crore" in unit or unit == "cr":
                 return val * 100
             return val
+    return None
+
+
+def _extract_years_of_support(t: str) -> Optional[int]:
+    """
+    Extract how many years the customer wants to support their family.
+    Patterns: "support for 20 years", "protect for 25 years", "20 साल तक",
+              "till my kids are 25", "next 15 years", "15 more years"
+    """
+    # Devanagari: "20 साल तक", "25 साल के लिए support"
+    t_norm = re.sub(r"साल\s+तक|साल\s+के\s+लिए|साल\s+support|साल\s+तक\s+cover", "years support", t)
+    t_norm = re.sub(r"साल|वर्ष", "years", t_norm)
+
+    patterns = [
+        r"(?:support|protect|provide|cover|secure)\s+(?:family|them|my\s+family)?\s*(?:for\s+)?(?:the\s+)?(?:next\s+)?(\d{1,2})\s*years?",
+        r"(?:next|for)\s+(\d{1,2})\s*years?",
+        r"(\d{1,2})\s*(?:more\s+)?years?\s+(?:of\s+)?(?:support|protection|cover)",
+        r"(\d{1,2})\s*years?\s+support",
+        r"till\s+(?:they|my\s+(?:kids?|children|wife|spouse|family))\s+(?:are|turn|become)\s+(\d{2})",  # "till kids are 25" — handled separately
+    ]
+    for p in patterns[:-1]:
+        m = re.search(p, t_norm)
+        if m:
+            val = int(m.group(1))
+            if 5 <= val <= 45:
+                return val
+
+    # "till kids are 25" — infer from age: we don't know kids' age, store raw only if >5
+    m = re.search(r"till\s+(?:they|kids?|children|spouse|wife|husband)\s+(?:are|turn)\s+(\d{2})", t_norm)
+    if m:
+        target_age = int(m.group(1))
+        if 10 <= target_age <= 60:
+            # Can't compute years without knowing kids' age — skip; LLM will handle it
+            pass
+
+    return None
+
+
+def _extract_existing_cover(t: str) -> Optional[float]:
+    """
+    Extract existing life insurance cover the customer already has.
+    Patterns: "₹50 lakh employer cover", "company gives 3x salary",
+              "I already have a 1 crore policy", "50 lakh term plan already",
+              "employer cover of 25 lakh"
+    """
+    # Devanagari normalisation
+    t_norm = re.sub(r"लाख(?:ों)?", "lakh", t)
+    t_norm = re.sub(r"करोड़|करोड", "crore", t_norm)
+
+    # Explicit amount + existing marker
+    existing_markers = [
+        "already have", "existing", "employer cover", "company cover",
+        "office cover", "workplace cover", "group cover", "group insurance",
+        "corporate cover", "current policy", "other policy", "another policy",
+        "term plan already", "already insured", "already covered",
+        "company ke through", "company se", "employer se",
+    ]
+    has_existing = any(m in t_norm for m in existing_markers)
+    if not has_existing:
+        return None
+
+    patterns = [
+        r"(?:₹\s*)?([\d.]+)\s*(crore|cr)\s+(?:cover|policy|insurance|sum\s+assured)?",
+        r"(?:₹\s*)?([\d.]+)\s*(lakh)\s+(?:cover|policy|insurance|sum\s+assured)?",
+        r"(?:cover|policy|insurance)\s+of\s+(?:₹\s*)?([\d.]+)\s*(crore|cr|lakh)",
+    ]
+    for p in patterns:
+        m = re.search(p, t_norm)
+        if m:
+            val = float(m.group(1))
+            unit = m.group(2).lower()
+            if "crore" in unit or unit == "cr":
+                return val * 100
+            return val
+
     return None
 
 

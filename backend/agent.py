@@ -129,8 +129,8 @@ def _auto_advance_stage(memory: SessionMemory, plan_type: str = "other") -> None
     """
     stage = memory.stage
 
-    # ── GREET: escape after 2 turns if LLM never signals DISCOVERY ──────
-    if stage == "GREET" and memory.turn_in_stage >= 2:
+    # ── GREET: escape after 1 turn — opener already introduced; GREET turn is just the bridge question ──
+    if stage == "GREET" and memory.turn_in_stage >= 1:
         memory.previous_stage = stage
         memory.stage = "DISCOVERY"
         memory.turn_in_stage = 0
@@ -308,6 +308,10 @@ class AgentSession:
 
         if analysis and not llm_error:
             apply_analysis(self.memory, analysis, user_text)
+        else:
+            # No META tag or LLM error — still advance the turn counter so
+            # Python's stage gates (GREET → DISCOVERY etc.) can fire correctly.
+            self.memory.turn_in_stage += 1
 
         _auto_advance_stage(self.memory, self.store.metadata.get("plan_type", "other"))
 
@@ -369,6 +373,8 @@ class AgentSession:
 
         if analysis and not llm_error:
             apply_analysis(self.memory, analysis, user_text)
+        else:
+            self.memory.turn_in_stage += 1
 
         _auto_advance_stage(self.memory, self.store.metadata.get("plan_type", "other"))
 
@@ -465,26 +471,36 @@ class AgentSession:
         missing_fields_line = ""
         if self.memory.stage == "DISCOVERY":
             p = self.memory.customer_profile
-            plan_type_key = self.store.metadata.get("plan_type", "other")
-            missing: list[str] = []
-            if p.age is None:
-                missing.append("age")
-            if p.dependents is None and p.marital_status is None:
-                missing.append("family situation (who depends on you financially)")
+
             if p.income_range is None:
-                missing.append("annual income")
-            if p.liabilities_lakh is None:
-                missing.append("any outstanding loans or EMIs")
-            if p.existing_coverage is None and p.existing_cover_lakh is None:
-                missing.append("existing life insurance (if any)")
-            if p.years_of_support is None:
-                missing.append("how many years of income support the family would need")
-            if missing:
+                # Income is the gating field for GAP_CALC — focus entirely on it until collected
                 missing_fields_line = (
-                    f"\nSTILL TO COLLECT IN DISCOVERY: {', '.join(missing)}.\n"
-                    f"Ask naturally — max 2 questions per turn. "
-                    f"Do NOT discuss the product, premiums, or cover amounts yet.\n"
+                    "\n⚠ CRITICAL: Annual income is NOT yet known. "
+                    "ASK FOR INCOME NOW before any other question.\n"
+                    "Say: 'And roughly what is your annual income?' — nothing else until you have it.\n"
+                    "If they ask 'how much cover do I need?' → "
+                    "'That's exactly what I'll calculate for you — I just need your annual income first. "
+                    "What does your income look like, roughly?'\n"
+                    "DO NOT give any cover amount, ballpark, or recommendation without income.\n"
                 )
+            else:
+                missing: list[str] = []
+                if p.age is None:
+                    missing.append("age")
+                if p.dependents is None and p.marital_status is None:
+                    missing.append("family situation (who depends on you financially)")
+                if p.liabilities_lakh is None:
+                    missing.append("any outstanding loans or EMIs")
+                if p.existing_coverage is None and p.existing_cover_lakh is None:
+                    missing.append("existing life insurance (if any)")
+                if p.years_of_support is None:
+                    missing.append("how many years of income support the family would need")
+                if missing:
+                    missing_fields_line = (
+                        f"\nSTILL TO COLLECT IN DISCOVERY: {', '.join(missing)}.\n"
+                        f"Ask naturally — max 2 questions per turn. "
+                        f"Do NOT discuss the product, premiums, or cover amounts yet.\n"
+                    )
 
         # ── GAP_CALC block — inject at GAP_CALC stage ──────────────────────
         gap_block = ""

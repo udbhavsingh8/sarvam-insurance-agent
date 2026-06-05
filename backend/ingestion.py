@@ -464,15 +464,20 @@ def ingest(pdf_path: str, index_dir: str = "data") -> tuple[int, str]:
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(text)
 
-    meta = _extract_metadata(text)
     meta_path = os.path.join(index_dir, f"{name}.meta.json")
-    with open(meta_path, "w", encoding="utf-8") as fh:
-        json.dump(meta, fh, ensure_ascii=False, indent=2)
+    if os.path.exists(meta_path):
+        with open(meta_path, encoding="utf-8") as fh:
+            meta = json.load(fh)
+    else:
+        meta = _extract_metadata(text)
+        with open(meta_path, "w", encoding="utf-8") as fh:
+            json.dump(meta, fh, ensure_ascii=False, indent=2)
 
-    brief = _generate_product_profile(text, meta)
     brief_path = os.path.join(index_dir, f"{name}.brief.txt")
-    with open(brief_path, "w", encoding="utf-8") as fh:
-        fh.write(brief)
+    if not os.path.exists(brief_path):
+        brief = _generate_product_profile(text, meta)
+        with open(brief_path, "w", encoding="utf-8") as fh:
+            fh.write(brief)
 
     # ── Product Structure JSON (premium tables + eligibility) ─────────────
     try:
