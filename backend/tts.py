@@ -175,12 +175,36 @@ def normalize_for_tts(text: str) -> str:
         text = re.sub(rf"\b{re.escape(abbr)}\b", spoken, text)
 
     # ── 6. Product / brand name fixes ────────────────────────────────────
-    text = re.sub(r'Click2Protect', 'Click 2 Protect', text, flags=re.IGNORECASE)
+    # "Click To Protect" avoids the "2" being read as "do" in Hindi TTS context
+    text = re.sub(r'Click\s*2\s*Protect', 'Click To Protect', text, flags=re.IGNORECASE)
     text = re.sub(r'COVID-19', 'COVID nineteen', text, flags=re.IGNORECASE)
 
     # ── 7. Tax section refs ───────────────────────────────────────────────
     text = re.sub(r'\b80C\b', 'eighty C', text)
     text = re.sub(r'\b10\(10D\)\b', 'ten ten D', text)
+
+    # ── 7b. Numeric ranges — must run BEFORE age-hyphen patterns ─────────
+    # "10-15 years" → "ten to fifteen years"
+    # "10-15 साल" → "ten to fifteen saal" (Devanagari already normalised above)
+    def _num_range(m: re.Match) -> str:
+        lo, hi = int(m.group(1)), int(m.group(2))
+        unit = m.group(3)
+        lo_w = _int_to_words(lo) if lo < 100 else str(lo)
+        hi_w = _int_to_words(hi) if hi < 100 else str(hi)
+        return f"{lo_w} to {hi_w} {unit}"
+    text = re.sub(
+        r'\b(\d{1,3})-(\d{1,3})\s*(years?|months?|days?|saal|varsh)\b',
+        _num_range,
+        text,
+        flags=re.IGNORECASE,
+    )
+    # Plain numeric range without unit: "10-15" by itself (e.g. "10-15 का" in Hindi)
+    def _bare_num_range(m: re.Match) -> str:
+        lo, hi = int(m.group(1)), int(m.group(2))
+        lo_w = _int_to_words(lo) if lo < 100 else str(lo)
+        hi_w = _int_to_words(hi) if hi < 100 else str(hi)
+        return f"{lo_w} to {hi_w}"
+    text = re.sub(r'\b(\d{1,3})-(\d{1,3})\b', _bare_num_range, text)
 
     # ── 8. Age hyphen patterns ────────────────────────────────────────────
     def _age_hyphen(m: re.Match) -> str:

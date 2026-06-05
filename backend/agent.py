@@ -38,24 +38,31 @@ _RUPEE_RE = re.compile(
 
 def _guard_discovery_numbers(text: str, profile: object) -> str:
     """
-    If the LLM slipped a rupee amount into a DISCOVERY response, replace the
-    entire response with a safe income-redirect. This is a hard safety net —
-    temperature + prompt rules are the primary prevention.
+    Hard safety net: block any rupee amount the LLM produces during DISCOVERY.
+
+    The LLM should NEVER mention cover amounts or premiums at this stage —
+    it doesn't have enough data yet. When triggered, redirect to the most
+    critical missing data point.
     """
     if not _RUPEE_RE.search(text):
         return text
 
+    age_known = getattr(profile, "age", None) is not None
     income_known = getattr(profile, "income_range", None) is not None
-    if income_known:
-        # Income is known but something else snuck in — just return what we have;
-        # the number might be a loan amount the user mentioned, which is fine.
-        return text
 
-    # Income unknown and LLM invented a number — redirect.
-    return (
-        "I'll get to the numbers in a moment — to make sure I give you the right figure, "
-        "I first need to know your annual income. What does your income look like, roughly?"
-    )
+    if not age_known:
+        return (
+            "Before I get to the numbers — can I ask your age quickly? "
+            "It's the first thing I need to work out the right cover for you."
+        )
+    if not income_known:
+        return (
+            "I'll get to the numbers in a moment — I just need your annual income first. "
+            "What does your income look like, roughly?"
+        )
+    # Both age and income are known. The LLM probably echoed a loan amount the
+    # user just mentioned — that is acceptable, let it through.
+    return text
 
 
 def build_risk_narrative(profile: "SessionMemory.customer_profile") -> str:  # type: ignore[name-defined]
@@ -507,7 +514,15 @@ class AgentSession:
         if self.memory.stage == "DISCOVERY":
             p = self.memory.customer_profile
 
-            if p.income_range is None:
+            if p.age is None:
+                # Age is required by discovery_sufficient() — collect it first
+                missing_fields_line = (
+                    "\n⚠ CRITICAL: Customer age is NOT yet known. "
+                    "ASK FOR AGE NOW — it is required before any recommendation or gap calculation.\n"
+                    "Say: 'Can I start with your age?' — ask this as the very first question.\n"
+                    "DO NOT give any cover amount or recommendation without age.\n"
+                )
+            elif p.income_range is None:
                 # Income is the gating field for GAP_CALC — focus entirely on it until collected
                 missing_fields_line = (
                     "\n⚠ CRITICAL: Annual income is NOT yet known. "
