@@ -491,7 +491,7 @@ class AgentSession:
             missing: list[str] = []
             if p.age is None:
                 missing.append("age")
-            if p.smoker is None and plan_type_for_profile in ("term", "other"):
+            if p.smoker is None and plan_type_for_profile == "term":
                 missing.append("smoker status (yes/no)")
             if p.income_range is None:
                 missing.append("annual income")
@@ -524,10 +524,22 @@ class AgentSession:
                 self.store.metadata,
                 self.store.sales_brief,
             )
-            recommendation_block = (
-                f"\nCALCULATED NUMBERS FOR THIS CUSTOMER:\n{rec_block}\n"
-                if rec_block else ""
-            )
+            # If the recommendation block explicitly says data is unavailable,
+            # inject a hard prohibition so the LLM cannot invent premium figures.
+            if rec_block and "cannot be estimated" in rec_block:
+                recommendation_block = (
+                    f"\nCALCULATED NUMBERS FOR THIS CUSTOMER:\n{rec_block}\n"
+                    f"\n⚠ PREMIUM FIGURES UNAVAILABLE: The product document contains no premium rates or tables.\n"
+                    f"You MUST NOT invent, approximate, or guess any premium amount.\n"
+                    f"If the customer asks about cost, say EXACTLY: "
+                    f"'The document does not have specific premium figures — "
+                    f"I would recommend getting a personalised quote directly from {self.store.metadata.get('company_name', 'the insurer')}.'\n"
+                )
+            else:
+                recommendation_block = (
+                    f"\nCALCULATED NUMBERS FOR THIS CUSTOMER:\n{rec_block}\n"
+                    if rec_block else ""
+                )
 
             # Full deterministic quote from document structure at RECOMMENDATION and CLOSE.
             if self.memory.stage in ("RECOMMENDATION", "CLOSE") and self.store.structure:

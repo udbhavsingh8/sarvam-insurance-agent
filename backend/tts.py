@@ -80,16 +80,116 @@ def normalize_for_tts(text: str) -> str:
     """
     Convert TTS-hostile patterns to natural spoken forms.
     Called on each sentence before it reaches bulbul:v3.
-    """
-    # Product name: Click2Protect → Click 2 Protect
-    text = re.sub(r'Click2Protect', 'Click 2 Protect', text, flags=re.IGNORECASE)
 
-    # COVID-19 → COVID nineteen
+    Pass order (matters — run early passes first):
+      1. Email addresses
+      2. Devanagari unit words → English equivalents  (so downstream regexes work)
+      3. Decimal space fix ("1. 5" → "1.5")
+      4. Decimal crore/lakh amounts (range then single)
+      5. Acronyms / abbreviations
+      6. Product names
+      7. Age hyphen patterns
+      8. LPA
+      9. ₹ amounts (plain integers)
+      10. Percentages
+      11. Large plain numbers
+    """
+    # ── 1. Email addresses ────────────────────────────────────────────────
+    def _email(m: re.Match) -> str:
+        local, domain = m.group(1), m.group(2)
+        domain_spoken = domain.replace(".", " dot ")
+        return f"{local} at {domain_spoken}"
+    text = re.sub(r'([A-Za-z0-9._%+\-]+)@([A-Za-z0-9.\-]+\.[A-Za-z]{2,})', _email, text)
+
+    # ── 2. Devanagari unit normalisation (must run BEFORE all amount regexes) ──
+    # Replace Devanagari currency/unit words with their English equivalents so
+    # the downstream amount regexes can match them uniformly.
+    text = re.sub(r'करोड़(?:ों)?', 'crore', text)          # करोड़ / करोड़ों
+    text = re.sub(r'लाख(?:ों)?', 'lakh', text)              # लाख / लाखों
+    text = re.sub(r'रुपय(?:े|ों)|रुपये?', 'rupees', text)   # रुपये / रुपयों
+    text = re.sub(r'(?:प्रति\s+)?वर्ष|सालाना|वार्षिक', 'per year', text)
+    text = re.sub(r'(?:प्रति\s+)?माह|महीन(?:े|ा)', 'per month', text)
+    text = re.sub(r'प्रतिदिन|प्रति\s+दिन', 'per day', text)
+
+    # ── 3. Decimal space fix: "1. 5" → "1.5" ────────────────────────────
+    text = re.sub(r'(\d+)\.\s+(\d+)', r'\1.\2', text)
+
+    # ── 4. Decimal amount helpers ─────────────────────────────────────────
+    _DIGIT_WORDS = {
+        "0": "zero", "1": "one", "2": "two", "3": "three", "4": "four",
+        "5": "five", "6": "six", "7": "seven", "8": "eight", "9": "nine",
+    }
+
+    def _decimal_to_spoken(integer_part: str, decimal_part: str) -> str:
+        int_word = _int_to_words(int(integer_part)) if 0 < int(integer_part) < 20 else integer_part
+        frac_spoken = " ".join(_DIGIT_WORDS.get(d, d) for d in decimal_part)
+        return f"{int_word} point {frac_spoken}"
+
+    # Range: "₹1.5 crore to ₹2.5 crore" or "1.5 to 2.5 crore"
+    def _decimal_range_amount(m: re.Match) -> str:
+        unit_word = "crore" if m.group(5).lower() in ("crore", "crores", "cr") else "lakh"
+        return (
+            f"{_decimal_to_spoken(m.group(1), m.group(2))} to "
+            f"{_decimal_to_spoken(m.group(3), m.group(4))} {unit_word}"
+        )
+    text = re.sub(
+        r'(?:₹\s*)?(\d{1,2})\.(\d{1,2})\s*(?:crores?|cr|lakhs?)?\s+to\s+(?:₹\s*)?(\d{1,2})\.(\d{1,2})\s*(crores?|cr|lakhs?)\b',
+        _decimal_range_amount,
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # Single decimal crore/lakh (with or without ₹ prefix): "₹1.20 crore", "1.5 lakh"
+    def _bare_decimal_amount(m: re.Match) -> str:
+        unit_word = "crore" if m.group(3).lower() in ("crore", "crores", "cr") else "lakh"
+        return _decimal_to_spoken(m.group(1), m.group(2)) + f" {unit_word}"
+    text = re.sub(
+        r'(?:₹\s*)?(\d{1,2})\.(\d{1,2})\s*(crores?|cr|lakhs?)\b',
+        _bare_decimal_amount,
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    # ── 5. Acronyms / abbreviations ──────────────────────────────────────
+    # These must be expanded BEFORE product-name substitutions to avoid
+    # partial matches. Spell out letter by letter with spaces so the TTS
+    # engine pronounces each character individually.
+    _ACRONYMS = {
+        "LIC":   "L I C",
+        "HDFC":  "H D F C",
+        "ICICI": "I C I C I",
+        "SBI":   "S B I",
+        "ULIP":  "U L I P",
+        "IRDA":  "I R D A",
+        "GST":   "G S T",
+        "CI":    "C I",     # Critical Illness abbreviation
+        "ADB":   "A D B",
+        "ROP":   "R O P",
+        "WOP":   "W O P",
+        "PPT":   "P P T",
+        "UIN":   "U I N",
+        "EMI":   "E M I",
+    }
+    for abbr, spoken in _ACRONYMS.items():
+        # Match the abbreviation as a whole word (not inside longer words)
+        text = re.sub(rf"\b{re.escape(abbr)}\b", spoken, text)
+
+    # ── 6. Product / brand name fixes ────────────────────────────────────
+    text = re.sub(r'Click2Protect', 'Click 2 Protect', text, flags=re.IGNORECASE)
     text = re.sub(r'COVID-19', 'COVID nineteen', text, flags=re.IGNORECASE)
 
-    # 80C → eighty C, 10(10D) → ten ten D
+    # ── 7. Tax section refs ───────────────────────────────────────────────
     text = re.sub(r'\b80C\b', 'eighty C', text)
     text = re.sub(r'\b10\(10D\)\b', 'ten ten D', text)
+
+    # ── 8. Age hyphen patterns ────────────────────────────────────────────
+    def _age_hyphen(m: re.Match) -> str:
+        n = int(m.group(1))
+        words = _int_to_words(n) if n < 100 else str(n)
+        unit = m.group(2)
+        old_suffix = " old" if m.group(3) else ""
+        return f"{words} {unit}{old_suffix}"
+    text = re.sub(r'\b(\d{1,2})-(year|month|day)(-old)?\b', _age_hyphen, text)
 
     # Age patterns: "29-year-old" → "twenty nine year old", "35-year" → "thirty five year"
     def _age_hyphen(m: re.Match) -> str:

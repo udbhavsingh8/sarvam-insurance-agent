@@ -128,28 +128,38 @@ def _extract_income(t: str) -> Optional[str]:
     """
     Returns a human-readable income range string, e.g. "15 LPA", "50,000/month".
     Keeps the original phrasing from the user — stored for display + LLM context.
+
+    Handles both English ("lakh") and Devanagari ("लाख") spellings, and
+    Hindi annual markers like "सालाना", "वार्षिक", "प्रति वर्ष".
     """
+    # Normalise: treat Devanagari "लाख" as "lakh" and Hindi annual words as "per annum"
+    t_norm = t
+    t_norm = re.sub(r"लाख(?:ों)?", "lakh", t_norm)          # लाख / लाखों → lakh
+    t_norm = re.sub(r"(?:सालाना|वार्षिक|प्रति\s+वर्ष)", "per annum", t_norm)
+    t_norm = re.sub(r"(?:प्रति\s+माह|महीने\s+में)", "per month", t_norm)
+    t_norm = re.sub(r"करोड़|करोड", "crore", t_norm)
+
     # Annual: "15 LPA", "15 lakhs per annum", "15 lakh per year"
-    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:lpa|lakh(?:s)?\s+(?:per\s+annum|per\s+year|annual))", t)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:lpa|lakh(?:s)?\s+(?:per\s+annum|per\s+year|annual))", t_norm)
     if m:
         return f"{m.group(1)} LPA"
 
     # "15 lakhs" / "15 lakh" (standalone, likely annual) — skip if preceded by loan/liability words
-    m = re.search(r"(\d+(?:\.\d+)?)\s*lakh(?:s)?", t)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*lakh(?:s)?", t_norm)
     if m:
         start = max(0, m.start() - 30)
-        context = t[start:m.start()]
+        context = t_norm[start:m.start()]
         if not re.search(r"loan|emi|debt|mortgage|liability|outstanding", context):
             return f"{m.group(1)} lakh"
 
     # Monthly: "50,000 per month", "50k per month", "50000 monthly"
-    m = re.search(r"([\d,]+)(?:k)?\s*(?:per\s+month|monthly|\/month|pm\b)", t)
+    m = re.search(r"([\d,]+)(?:k)?\s*(?:per\s+month|monthly|\/month|pm\b)", t_norm)
     if m:
         raw = m.group(1).replace(",", "")
         return f"₹{raw}/month"
 
     # "my salary is X" / "earn X" — catch remaining patterns
-    m = re.search(r"(?:earn|salary|income|make)\s+(?:around\s+|about\s+|rs\.?\s*|₹\s*)?([\d,]+)", t)
+    m = re.search(r"(?:earn|salary|income|make)\s+(?:around\s+|about\s+|rs\.?\s*|₹\s*)?([\d,]+)", t_norm)
     if m:
         raw = m.group(1).replace(",", "")
         if len(raw) >= 5:  # likely monthly (50000) not age
@@ -162,6 +172,35 @@ def _extract_dependents(t: str) -> Optional[int]:
     # "2 kids", "two kids", "3 children", "one child", "no kids", "no children"
     word_nums = {"no": 0, "zero": 0, "one": 1, "two": 2, "three": 3,
                  "four": 4, "five": 5, "six": 6}
+
+    # Family-member phrases that imply exactly 1 dependent
+    # e.g. "my father is dependent on me", "my mother depends on me"
+    one_dependent_phrases = [
+        "my father", "my mother", "my parent", "my spouse", "my wife", "my husband",
+        "my sister", "my brother", "my grandmother", "my grandfather",
+        "मेरे पिता", "मेरी माँ", "मेरी माता", "मेरे माता-पिता",
+    ]
+    # Only count as 1 dependent if also "dependent on me / depends on me / rely on me"
+    dependency_markers = ["dependent on me", "depends on me", "rely on me", "relies on me",
+                          "निर्भर है", "dependent hai", "support karta"]
+    text_lower_full = t  # already lowercased
+    has_dependency_marker = any(m in text_lower_full for m in dependency_markers)
+    if has_dependency_marker:
+        for phrase in one_dependent_phrases:
+            if phrase.lower() in text_lower_full:
+                return 1
+
+    # Explicit zero-dependent phrases (check BEFORE generic patterns)
+    zero_phrases = [
+        "nobody is dependent", "no one is dependent", "none are dependent",
+        "no dependents", "no dependent", "nobody depends on me",
+        "no one depends on me", "i have no dependent", "i don't have any dependent",
+        "i do not have any dependent", "no family dependent", "koi dependent nahi",
+        "कोई dependent", "कोई निर्भर नहीं",
+    ]
+    for phrase in zero_phrases:
+        if phrase in t:
+            return 0
 
     # Digit form: "2 kids", "3 children", "4 dependents"
     m = re.search(r"(\d)\s+(?:kid|child|children|dependent)", t)
@@ -203,12 +242,16 @@ def _extract_gender(t: str) -> Optional[str]:
 
 
 def _extract_policy_term(t: str) -> Optional[int]:
-    """Extract policy term in years from utterances like '20 year term', 'for 30 years'."""
+    """Extract policy term in years from utterances like '20 year term', 'for 30 years', '15 साल'."""
     patterns = [
         r"(\d{1,2})[- ]year(?:s)?[- ](?:term|policy|plan|cover)",
         r"(?:term|policy|cover)\s+(?:of\s+)?(\d{1,2})\s+years?",
         r"for\s+(\d{1,2})\s+years?\s+(?:term|policy|plan|cover)",
         r"(\d{1,2})\s+yr\s+(?:term|plan|policy)",
+        # Hindi: "15 साल", "20 वर्ष", "15 साल का", "15 साल के लिए"
+        r"(\d{1,2})\s*(?:साल|वर्ष)(?:\s+(?:का|के\s+लिए|तक|last|चाहिए))?",
+        # "coverage 15 साल last करेगा" style
+        r"(\d{1,2})\s*(?:साल|वर्ष)\s+(?:last|चलेगा|रहेगा|होगा)",
     ]
     for p in patterns:
         m = re.search(p, t)
