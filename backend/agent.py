@@ -14,8 +14,9 @@ from typing import Iterator
 from characters import CHARACTERS, SUPPORTED_LANGUAGES
 from conversation_analyzer import apply_analysis, parse_meta_tag
 from errors import LLMError
+from gap_engine import build_gap_calculation, gap_to_prompt_block, _fmt_lakh
 from llm import LLMClient
-from memory import SessionMemory
+from memory import SessionMemory, choose_explain_topics
 from metrics import TurnMetrics, log_session, log_turn
 from profile_extractor import extract_profile_fields
 from prompts import ADVISOR_RULES, DEFLECTION_PLAYBOOK, MAIN_SYSTEM_PROMPT, META_TAG_INSTRUCTION, OPENER_PROMPT, STAGE_INTENTS, VOICE_RULES, language_display_name
@@ -117,110 +118,115 @@ def build_risk_narrative(profile: "SessionMemory.customer_profile") -> str:  # t
 
 def _auto_advance_stage(memory: SessionMemory, plan_type: str = "other") -> None:
     """
-    Python-controlled stage gating. Runs after every turn.
+    Python-controlled stage gating for the new consultative sales flow.
 
-    The LLM requests stage transitions via its META tag, but this function
-    has the final say. It prevents two classes of failure:
-      1. LLM stays stuck (never emits a transition tag) → Python advances when
-         objective conditions are met.
-      2. LLM advances too early → Python blocks premature transitions.
+    Term:    GREET → DISCOVERY → GAP_CALC → POSITION → RECOMMEND → VARIANTS → CLOSE
+    Savings: GREET → DISCOVERY → RECOMMEND → EXPLAIN → CLOSE
+    Any:     → QUESTION_ANSWER | OBJECTIONS (return after 1 turn)
 
-    Rules:
-      INTRODUCE → PROFILE: Python escape after 2 turns (I-8: prevents stuck INTRODUCE).
-      PROFILE → EXPLAIN: only when profile.is_sufficient(plan_type) is True.
-      PERSONALIZE → EXPLAIN: always after one turn (one-turn bridge).
-      EXPLAIN → CLOSE: only when close_readiness >= 70 AND at least 3 EXPLAIN turns.
-      CLOSE substages: Python auto-advances SUMMARY→PURCHASE_INTENT and terminal substages.
-      HANDLE/QA: return to previous stage after 1 turn.
+    Python has final say on all transitions. LLM signals intent via META tag;
+    this function enforces the gates.
     """
     stage = memory.stage
 
-    # I-8: Escape INTRODUCE if LLM never emits a transition tag after 2 turns.
-    if stage == "INTRODUCE" and memory.turn_in_stage >= 2:
+    # ── GREET: escape after 2 turns if LLM never signals DISCOVERY ──────
+    if stage == "GREET" and memory.turn_in_stage >= 2:
         memory.previous_stage = stage
-        memory.stage = "PROFILE"
+        memory.stage = "DISCOVERY"
         memory.turn_in_stage = 0
         return
 
-    if stage == "PROFILE" and memory.customer_profile.is_sufficient(plan_type):
+    # ── DISCOVERY: advance only when discovery_sufficient() is True ──────
+    # Python-only gate — LLM cannot signal out of DISCOVERY.
+    if stage == "DISCOVERY":
+        if memory.customer_profile.discovery_sufficient(plan_type):
+            memory.previous_stage = stage
+            if plan_type == "term":
+                memory.stage = "GAP_CALC"
+            else:
+                memory.stage = "RECOMMEND"
+            memory.turn_in_stage = 0
+        return  # always return — never fall through
+
+    # ── GAP_CALC: auto-advance to POSITION after 1 turn ─────────────────
+    if stage == "GAP_CALC" and memory.turn_in_stage >= 1:
         memory.previous_stage = stage
-        memory.stage = "NEED_DEVELOPMENT"
+        memory.stage = "POSITION"
         memory.turn_in_stage = 0
         return
 
-    # NEED_DEVELOPMENT: Python escape after 2 turns — prevents LLM from getting stuck
-    if stage == "NEED_DEVELOPMENT" and memory.turn_in_stage >= 2:
+    # ── POSITION: auto-advance to RECOMMEND after 1 turn ────────────────
+    if stage == "POSITION" and memory.turn_in_stage >= 1:
         memory.previous_stage = stage
-        memory.stage = "EXPLAIN"
+        memory.stage = "RECOMMEND"
         memory.turn_in_stage = 0
         return
 
-    if stage == "PERSONALIZE":
+    # ── RECOMMEND: auto-advance after 1 turn ────────────────────────────
+    if stage == "RECOMMEND" and memory.turn_in_stage >= 1:
         memory.previous_stage = stage
-        memory.stage = "NEED_DEVELOPMENT"
+        memory.stage = "VARIANTS" if plan_type == "term" else "EXPLAIN"
         memory.turn_in_stage = 0
         return
 
-    # RECOMMENDATION: Python auto-advance to CLOSE after 1 turn
-    if stage == "RECOMMENDATION" and memory.turn_in_stage >= 1:
+    # ── VARIANTS: LLM drives this (signals CLOSE when done).
+    #    Hard escape after 6 turns to prevent infinite loop.
+    if stage == "VARIANTS" and memory.turn_in_stage >= 6:
         memory.previous_stage = stage
         memory.stage = "CLOSE"
-        memory.close_substage = "PURCHASE_INTENT"  # skip SUMMARY — recommendation IS the summary
+        memory.close_substage = "PURCHASE_INTENT"
         memory.turn_in_stage = 0
         return
 
-    if stage in ("HANDLE", "QUESTION_ANSWER"):
-        # Force return to previous stage after 1 turn — never let QA/HANDLE become a trap.
+    # ── EXPLAIN (savings plans): advance to CLOSE when all topics covered ─
+    if stage == "EXPLAIN":
+        topics = memory.explain_topics
+        on_last_topic = (not topics or
+                         memory.explain_subtopic_index >= len(topics) - 1)
+        if (on_last_topic and memory.turn_in_stage >= 1) or memory.turn_in_stage >= 6:
+            memory.previous_stage = stage
+            memory.stage = "CLOSE"
+            memory.close_substage = "PURCHASE_INTENT"
+            memory.turn_in_stage = 0
+        return
+
+    # ── QUESTION_ANSWER / OBJECTIONS: return after 1 turn ───────────────
+    if stage in ("QUESTION_ANSWER", "OBJECTIONS"):
         if memory.turn_in_stage >= 1:
-            return_to = memory.return_to_stage or memory.previous_stage or "EXPLAIN"
+            return_to = memory.return_to_stage or memory.previous_stage or "DISCOVERY"
             memory.previous_stage = stage
             memory.stage = return_to
             memory.return_to_stage = None
             memory.turn_in_stage = 0
         return
 
-    if stage == "EXPLAIN":
-        intel = memory.intelligence
-        topics = memory.explain_topics
-        on_last_topic = (
-            not topics or
-            memory.explain_subtopic_index >= len(topics) - 1
-        )
-        # Advance to RECOMMENDATION when:
-        # (a) All topics covered and at least 1 turn on the final topic, OR
-        # (b) Customer is very engaged (close_readiness >= 50) and 2+ turns done, OR
-        # (c) Hard escape after 6 EXPLAIN turns regardless (prevents infinite loop)
-        if (on_last_topic and memory.turn_in_stage >= 1) or \
-           (intel.close_readiness >= 50 and memory.turn_in_stage >= 2) or \
-           (memory.turn_in_stage >= 6):
-            memory.previous_stage = stage
-            memory.stage = "RECOMMENDATION"
-            memory.turn_in_stage = 0
-            return
-
+    # ── CLOSE: substage machine ──────────────────────────────────────────
     if stage == "CLOSE":
         _auto_advance_close_substage(memory)
 
+    # ── Legacy stages (kept for sessions that started on old code) ───────
+    if stage == "INTRODUCE" and memory.turn_in_stage >= 2:
+        memory.stage = "GREET"
+        memory.turn_in_stage = 0
+
 
 def _auto_advance_close_substage(memory: SessionMemory) -> None:
-    """Python-controlled close substage gating."""
+    """Python-controlled close substage gating.
+
+    New flow starts at PURCHASE_INTENT (assumptive close).
+    PROCEED → CLOSED after 1 turn.
+    FEEDBACK → CLOSED after 1 turn (LLM can also signal it via META).
+    """
     sub = memory.close_substage
 
-    # SUMMARY: auto-advance to PURCHASE_INTENT after 1 turn (LLM cannot skip)
-    if sub == "SUMMARY" and memory.turn_in_stage >= 1:
-        memory.close_substage = "PURCHASE_INTENT"
-        memory.turn_in_stage = 0
-        return
-
-    # PROCEED: auto-advance to CLOSED after 1 turn (onboarding message delivered)
+    # PROCEED: handoff message delivered — auto close
     if sub == "PROCEED" and memory.turn_in_stage >= 1:
         memory.close_substage = "CLOSED"
         memory.turn_in_stage = 0
         return
 
-    # FEEDBACK: LLM signals CLOSED via META after collecting reason.
-    # Safety cap: force CLOSED after 3 turns to prevent infinite feedback loop.
-    if sub == "FEEDBACK" and memory.turn_in_stage >= 3:
+    # FEEDBACK: collect one response then close
+    if sub == "FEEDBACK" and memory.turn_in_stage >= 2:
         memory.close_substage = "CLOSED"
         memory.turn_in_stage = 0
         return
@@ -430,10 +436,117 @@ class AgentSession:
     # ── Internal ───────────────────────────────────────────────────────
 
     def _build_messages(self, user_text: str) -> list[dict]:
-        from memory import choose_explain_topics
+        # GPT-4o-mini has a 128k context window. Keep limits generous but reasonable.
+        BRIEF_CHAR_LIMIT = 3500
+        DOC_CONTEXT_CHAR_LIMIT = 1500
 
-        # Lazily initialize the dynamic topic list on first EXPLAIN turn.
-        # Uses plan_type from document metadata + current customer profile.
+        import re as _re
+
+        brief = self.store.sales_brief or "No product profile available."
+
+        # Strip PREMIUMS from brief during GREET and DISCOVERY — the benchmark
+        # ₹22/day figure lives there and would be quoted as personalised without context.
+        if self.memory.stage in ("GREET", "DISCOVERY", "INTRODUCE", "PROFILE", "NEED_DEVELOPMENT"):
+            brief = _re.sub(
+                r'PREMIUMS:.*?(?=\n[A-Z ]+:|$)',
+                '',
+                brief,
+                flags=_re.DOTALL | _re.IGNORECASE,
+            ).strip()
+
+        if len(brief) > BRIEF_CHAR_LIMIT:
+            brief = brief[:BRIEF_CHAR_LIMIT] + "\n[... product profile truncated for brevity ...]"
+
+        raw_context = self.store.get_context(user_text, top_k=3)
+        if len(raw_context) > DOC_CONTEXT_CHAR_LIMIT:
+            raw_context = raw_context[:DOC_CONTEXT_CHAR_LIMIT]
+
+        # ── DISCOVERY missing-fields line ───────────────────────────────────
+        missing_fields_line = ""
+        if self.memory.stage == "DISCOVERY":
+            p = self.memory.customer_profile
+            plan_type_key = self.store.metadata.get("plan_type", "other")
+            missing: list[str] = []
+            if p.age is None:
+                missing.append("age")
+            if p.dependents is None and p.marital_status is None:
+                missing.append("family situation (who depends on you financially)")
+            if p.income_range is None:
+                missing.append("annual income")
+            if p.liabilities_lakh is None:
+                missing.append("any outstanding loans or EMIs")
+            if p.existing_coverage is None and p.existing_cover_lakh is None:
+                missing.append("existing life insurance (if any)")
+            if p.years_of_support is None:
+                missing.append("how many years of income support the family would need")
+            if missing:
+                missing_fields_line = (
+                    f"\nSTILL TO COLLECT IN DISCOVERY: {', '.join(missing)}.\n"
+                    f"Ask naturally — max 2 questions per turn. "
+                    f"Do NOT discuss the product, premiums, or cover amounts yet.\n"
+                )
+
+        # ── GAP_CALC block — inject at GAP_CALC stage ──────────────────────
+        gap_block = ""
+        if self.memory.stage == "GAP_CALC":
+            from gap_engine import build_gap_calculation, gap_to_prompt_block
+            gap = build_gap_calculation(self.memory.customer_profile)
+            if gap:
+                self.memory.intelligence.gap_lakh = gap["gap_lakh"]
+                gap_block = gap_to_prompt_block(gap)
+
+        # ── Risk narrative (injected at RECOMMEND, VARIANTS, CLOSE) ────────
+        _NARRATIVE_STAGES = ("RECOMMEND", "VARIANTS", "EXPLAIN", "CLOSE", "OBJECTIONS")
+        risk_narrative = (
+            build_risk_narrative(self.memory.customer_profile)
+            if self.memory.stage in _NARRATIVE_STAGES
+            else ""
+        )
+
+        # ── Calculated numbers (VARIANTS and CLOSE) ─────────────────────────
+        policy_quote = ""
+        recommendation_block = ""
+        if self.memory.stage in ("VARIANTS", "CLOSE", "EXPLAIN", "RECOMMEND"):
+            rec_block = build_recommendation_block(
+                self.memory.customer_profile,
+                self.store.metadata,
+                self.store.sales_brief,
+            )
+            if rec_block and "cannot be estimated" in rec_block:
+                recommendation_block = (
+                    f"\nCALCULATED NUMBERS FOR THIS CUSTOMER:\n{rec_block}\n"
+                    f"\n⚠ PREMIUM FIGURES UNAVAILABLE: No rate tables in this document.\n"
+                    f"Do NOT invent a premium. If asked, say: 'The exact figure for your age requires "
+                    f"a quote directly from {self.store.metadata.get('company_name', 'the insurer')}.'\n"
+                )
+            elif rec_block:
+                recommendation_block = f"\nCALCULATED NUMBERS FOR THIS CUSTOMER:\n{rec_block}\n"
+
+            # Also inject the stored gap as a reminder at VARIANTS/CLOSE
+            if self.memory.intelligence.gap_lakh:
+                from gap_engine import _fmt_lakh
+                recommendation_block += (
+                    f"\nCUSTOMER PROTECTION GAP (computed at GAP_CALC): "
+                    f"{_fmt_lakh(self.memory.intelligence.gap_lakh)}\n"
+                    f"Use this as the basis for your cover recommendation and assumptive close.\n"
+                )
+
+            # Full deterministic quote at CLOSE if document structure available
+            if self.memory.stage == "CLOSE" and self.store.structure:
+                try:
+                    cover_rec = recommend_cover(self.memory.customer_profile)
+                    if cover_rec:
+                        freq = self.memory.customer_profile.payment_frequency or "annual"
+                        quote = generate_quote(
+                            self.memory.customer_profile,
+                            cover_rec.cover_lakh,
+                            self.store.structure,
+                        )
+                        policy_quote = "\n" + quote_to_prompt_block(quote, freq) + "\n"
+                except (QuoteError, Exception):
+                    pass
+
+        # ── EXPLAIN: savings plans topic tracker ────────────────────────────
         if self.memory.stage == "EXPLAIN" and not self.memory.explain_topics:
             plan_type = self.store.metadata.get("plan_type", "other")
             self.memory.explain_topics = choose_explain_topics(
@@ -454,115 +567,7 @@ class AgentSession:
                 f"(topic {idx + 1} of {len(self.memory.explain_topics)}{remaining_str})\n"
             )
 
-        # GPT-4o-mini has a 128k context window. Keep limits generous but reasonable.
-        BRIEF_CHAR_LIMIT = 3500
-        DOC_CONTEXT_CHAR_LIMIT = 1500
-
-        import re as _re
-
-        brief = self.store.sales_brief or "No product profile available."
-
-        # At INTRODUCE, PROFILE, and NEED_DEVELOPMENT strip the PREMIUMS section
-        # from the brief entirely. Marketing figures like "₹22/day" live there and
-        # the LLM will quote them as customer-specific premiums if it can see them.
-        # Calculated numbers are not yet available at these stages, so any premium
-        # figure the LLM could cite would be wrong. Remove the temptation.
-        if self.memory.stage in ("INTRODUCE", "PROFILE", "NEED_DEVELOPMENT"):
-            brief = _re.sub(
-                r'PREMIUMS:.*?(?=\n[A-Z ]+:|$)',
-                '',
-                brief,
-                flags=_re.DOTALL | _re.IGNORECASE,
-            ).strip()
-
-        if len(brief) > BRIEF_CHAR_LIMIT:
-            brief = brief[:BRIEF_CHAR_LIMIT] + "\n[... product profile truncated for brevity ...]"
-
-        raw_context = self.store.get_context(user_text, top_k=3)
-        if len(raw_context) > DOC_CONTEXT_CHAR_LIMIT:
-            raw_context = raw_context[:DOC_CONTEXT_CHAR_LIMIT]
-
-        # Missing fields line — injected only at PROFILE stage so the LLM knows
-        # exactly what is still needed and cannot go off-script about premiums.
-        missing_fields_line = ""
-        if self.memory.stage == "PROFILE":
-            p = self.memory.customer_profile
-            plan_type_for_profile = self.store.metadata.get("plan_type", "other")
-            missing: list[str] = []
-            if p.age is None:
-                missing.append("age")
-            if p.smoker is None and plan_type_for_profile == "term":
-                missing.append("smoker status (yes/no)")
-            if p.income_range is None:
-                missing.append("annual income")
-            if p.dependents is None and p.marital_status is None:
-                missing.append("family situation (married / dependents)")
-            if p.existing_coverage is None:
-                missing.append("existing insurance coverage")
-            if missing:
-                missing_fields_line = (
-                    f"\nSTILL NEEDED FROM CUSTOMER: {', '.join(missing)}.\n"
-                    f"Ask ONLY about these fields this turn — naturally, one or two at a time.\n"
-                    f"Do NOT discuss premiums, product features, or benefits until all are collected.\n"
-                )
-
-        # Risk narrative: deterministic profile → vulnerability story.
-        # Injected at all sales-active stages so the LLM always has
-        # the customer's specific situation, not just a field list.
-        _NARRATIVE_STAGES = ("NEED_DEVELOPMENT", "EXPLAIN", "RECOMMENDATION", "CLOSE", "HANDLE")
-        risk_narrative = (
-            build_risk_narrative(self.memory.customer_profile)
-            if self.memory.stage in _NARRATIVE_STAGES
-            else ""
-        )
-
-        # Calculated numbers: inject at EXPLAIN, RECOMMENDATION, and CLOSE.
-        policy_quote = ""
-        if self.memory.stage in ("EXPLAIN", "RECOMMENDATION", "CLOSE"):
-            rec_block = build_recommendation_block(
-                self.memory.customer_profile,
-                self.store.metadata,
-                self.store.sales_brief,
-            )
-            # If the recommendation block explicitly says data is unavailable,
-            # inject a hard prohibition so the LLM cannot invent premium figures.
-            if rec_block and "cannot be estimated" in rec_block:
-                recommendation_block = (
-                    f"\nCALCULATED NUMBERS FOR THIS CUSTOMER:\n{rec_block}\n"
-                    f"\n⚠ PREMIUM FIGURES UNAVAILABLE: The product document contains no premium rates or tables.\n"
-                    f"You MUST NOT invent, approximate, or guess any premium amount.\n"
-                    f"If the customer asks about cost, say EXACTLY: "
-                    f"'The document does not have specific premium figures — "
-                    f"I would recommend getting a personalised quote directly from {self.store.metadata.get('company_name', 'the insurer')}.'\n"
-                )
-            else:
-                recommendation_block = (
-                    f"\nCALCULATED NUMBERS FOR THIS CUSTOMER:\n{rec_block}\n"
-                    if rec_block else ""
-                )
-
-            # Full deterministic quote from document structure at RECOMMENDATION and CLOSE.
-            if self.memory.stage in ("RECOMMENDATION", "CLOSE") and self.store.structure:
-                try:
-                    cover_rec = recommend_cover(self.memory.customer_profile)
-                    if cover_rec:
-                        freq = (
-                            self.memory.customer_profile.payment_frequency or "annual"
-                        )
-                        quote = generate_quote(
-                            self.memory.customer_profile,
-                            cover_rec.cover_lakh,
-                            self.store.structure,
-                        )
-                        policy_quote = "\n" + quote_to_prompt_block(quote, freq) + "\n"
-                except QuoteError:
-                    pass
-                except Exception:
-                    pass
-        else:
-            recommendation_block = ""
-
-        # Close substage context — drives the exact behavior within CLOSE
+        # ── Close substage ──────────────────────────────────────────────────
         close_substage_line = ""
         if self.memory.stage == "CLOSE":
             sub = self.memory.close_substage
@@ -573,12 +578,17 @@ class AgentSession:
         if self.memory.stage == "CLOSE":
             stage_intent = CLOSE_SUBSTAGE_INTENTS.get(self.memory.close_substage, stage_intent)
 
-        # Deflection playbook: active whenever objections are likely
+        # ── Deflection playbook ─────────────────────────────────────────────
         active_deflection = (
             DEFLECTION_PLAYBOOK
-            if self.memory.stage in ("EXPLAIN", "NEED_DEVELOPMENT", "RECOMMENDATION", "HANDLE")
+            if self.memory.stage in ("VARIANTS", "EXPLAIN", "RECOMMEND", "OBJECTIONS", "CLOSE")
             else ""
         )
+
+        # ── Combined context blocks ─────────────────────────────────────────
+        # Merge gap_block into recommendation_block area for prompt clarity
+        if gap_block:
+            recommendation_block = gap_block + recommendation_block
 
         system = MAIN_SYSTEM_PROMPT.format(
             name=self.character["name"],
