@@ -7,6 +7,7 @@ ConversationAnalyzer, and metrics logging.
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from typing import Iterator
@@ -26,6 +27,35 @@ from cover_engine import recommend_cover
 from quote_engine import generate_quote, quote_to_prompt_block, QuoteError
 
 _FALLBACK = "I'm having a connection issue right now. Could you give me a moment and try again?"
+
+# Rupee-amount patterns that should never appear in a DISCOVERY response.
+_RUPEE_RE = re.compile(
+    r'(?:₹\s*\d|'           # ₹500, ₹ 1
+    r'\d+\s*(?:lakh|crore|cr\b|l\b)|'  # 50 lakh, 2 crore, 3cr
+    r'(?:lakh|crore)\s*\d)', # lakh 50 (unusual order)
+    re.IGNORECASE,
+)
+
+def _guard_discovery_numbers(text: str, profile: object) -> str:
+    """
+    If the LLM slipped a rupee amount into a DISCOVERY response, replace the
+    entire response with a safe income-redirect. This is a hard safety net —
+    temperature + prompt rules are the primary prevention.
+    """
+    if not _RUPEE_RE.search(text):
+        return text
+
+    income_known = getattr(profile, "income_range", None) is not None
+    if income_known:
+        # Income is known but something else snuck in — just return what we have;
+        # the number might be a loan amount the user mentioned, which is fine.
+        return text
+
+    # Income unknown and LLM invented a number — redirect.
+    return (
+        "I'll get to the numbers in a moment — to make sure I give you the right figure, "
+        "I first need to know your annual income. What does your income look like, roughly?"
+    )
 
 
 def build_risk_narrative(profile: "SessionMemory.customer_profile") -> str:  # type: ignore[name-defined]
@@ -287,7 +317,7 @@ class AgentSession:
         messages = self._build_messages(user_text)
         t_llm_start = time.time()
         try:
-            raw = self._llm.complete(messages)
+            raw = self._llm.complete(messages, stage=self.memory.stage)
         except LLMError as exc:
             raw = _FALLBACK
             llm_error = True
@@ -295,6 +325,11 @@ class AgentSession:
         llm_ms = int((time.time() - t_llm_start) * 1000)
 
         clean, analysis = parse_meta_tag(raw)
+
+        # Stage-level hallucination guard: if LLM mentioned rupee amounts during
+        # DISCOVERY (where numbers are forbidden), replace with a safe redirect.
+        if not llm_error and self.memory.stage == "DISCOVERY":
+            clean = _guard_discovery_numbers(clean, self.memory.customer_profile)
 
         # If the model produced only a META tag with no spoken text, use fallback
         if not clean.strip() and not llm_error:
@@ -342,7 +377,7 @@ class AgentSession:
         self._pending_user_text = user_text
         self._stream_parts: list[str] = []
 
-        for token in self._llm.stream(messages):
+        for token in self._llm.stream(messages, stage=self.memory.stage):
             self._stream_parts.append(token)
             yield token
 
