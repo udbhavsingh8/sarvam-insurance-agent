@@ -43,8 +43,9 @@ def build_recommendation_block(
     brief_text: str = "",
 ) -> str:
     """
-    Return a compact text block (< 220 chars) for injection into the system prompt.
-    Returns empty string if the profile has too little data to be meaningful.
+    Return a compact text block for injection into the system prompt.
+    Only includes values traceable to profile, document, or deterministic calculation.
+    Returns empty string if profile has too little data.
     """
     plan_type = plan_meta.get("plan_type", "other")
 
@@ -52,11 +53,22 @@ def build_recommendation_block(
     if not rec:
         return ""
 
-    lines = [
-        f"Suggested cover: {rec['cover_display']}  ({rec['cover_rationale']})",
-        f"Estimated premium: approx. {rec['premium_display']}  ({rec['premium_rationale']})",
-        "Always say \"approximately\" — actual premium requires full underwriting by the insurer.",
-    ]
+    lines = [f"Suggested cover: {rec['cover_display']}  ({rec['cover_rationale']})"]
+
+    if rec.get("premium_display"):
+        source_note = rec.get("premium_source", "industry benchmark estimate")
+        lines.append(
+            f"Premium estimate: approx. {rec['premium_display']}  "
+            f"({rec['premium_rationale']} | source: {source_note})"
+        )
+        lines.append(
+            "Note: this is an estimate only — actual premium requires full underwriting by the insurer."
+        )
+    else:
+        lines.append(
+            "Premium: cannot be estimated without document rate data — refer to policy document."
+        )
+
     return "\n".join(lines)
 
 
@@ -71,9 +83,9 @@ def _compute(
         return _term_rec(profile, brief_text)
     if plan_type == "health":
         return _health_rec(profile)
-    # For ULIP, savings, pension, child — too product-specific for generic estimates.
-    # Return None and let the LLM reference the brief instead.
-    return None
+    # For ULIP, savings, pension, child: return cover guidance only — no premium estimate.
+    # Premiums for these products are too product-specific for any generic formula.
+    return _non_term_guidance(profile, plan_type, brief_text)
 
 
 def _term_rec(profile: "CustomerProfile", brief_text: str) -> Optional[dict]:
@@ -98,31 +110,43 @@ def _term_rec(profile: "CustomerProfile", brief_text: str) -> Optional[dict]:
     cover_lakh = max(50, min(cover_lakh, 500))  # floor ₹50L, cap ₹5Cr
 
     # ── Premium estimate ────────────────────────────────────────────────
-    # Try to extract a reference rate from the brief for this product;
-    # fall back to industry benchmark.
-    base_per_crore = _extract_reference_premium(brief_text) or _TERM_BASE_PREMIUM_PER_CRORE
+    doc_rate = _extract_reference_premium(brief_text)
+    if doc_rate:
+        base_per_crore = doc_rate
+        premium_source = "document rate"
+    else:
+        base_per_crore = _TERM_BASE_PREMIUM_PER_CRORE
+        premium_source = "industry benchmark (document rate unavailable)"
 
     age_factor = (1 + _AGE_LOADING_PER_YEAR) ** max(0, age - _TERM_BASE_AGE)
-    smoker_factor = (1 + _SMOKER_LOADING) if profile.smoker else 1.0
 
+    # I-14: smoker=None must not be silently treated as non-smoker.
+    # Omit premium estimate if smoker status unknown — it would be misleading.
+    if profile.smoker is None:
+        return {
+            "cover_lakh": cover_lakh,
+            "cover_display": _format_cover(cover_lakh),
+            "cover_rationale": cover_rationale,
+            "premium_display": None,   # cannot estimate without smoker status
+            "premium_rationale": f"age {age}, smoker status unknown",
+            "premium_source": premium_source,
+        }
+
+    smoker_factor = (1 + _SMOKER_LOADING) if profile.smoker else 1.0
     annual_per_crore = base_per_crore * age_factor * smoker_factor
     annual_premium = int(annual_per_crore * cover_lakh / 100)
-    daily_premium = round(annual_premium / 365)
 
-    profile_parts: list[str] = [f"age {age}"]
-    if profile.smoker is not None:
-        profile_parts.append("smoker" if profile.smoker else "non-smoker")
-
-    premium_rationale = ", ".join(profile_parts)
+    smoker_label = "smoker" if profile.smoker else "non-smoker"
+    premium_rationale = f"age {age}, {smoker_label}"
 
     return {
         "cover_lakh": cover_lakh,
         "cover_display": _format_cover(cover_lakh),
         "cover_rationale": cover_rationale,
         "annual_premium": annual_premium,
-        "daily_premium": daily_premium,
-        "premium_display": f"₹{daily_premium}/day (₹{annual_premium:,}/year)",
+        "premium_display": f"₹{annual_premium:,}/year",
         "premium_rationale": premium_rationale,
+        "premium_source": premium_source,
     }
 
 
@@ -147,9 +171,9 @@ def _health_rec(profile: "CustomerProfile") -> Optional[dict]:
         "cover_display": _format_cover(cover_lakh),
         "cover_rationale": f"₹5 lakh per person for {family_size} member(s)",
         "annual_premium": annual_premium,
-        "daily_premium": daily_premium,
-        "premium_display": f"₹{daily_premium}/day (₹{annual_premium:,}/year)",
+        "premium_display": f"₹{annual_premium:,}/year",
         "premium_rationale": f"age {age}, {family_size}-member family",
+        "premium_source": "industry benchmark (document rate unavailable)",
     }
 
 
@@ -223,6 +247,44 @@ def _extract_reference_premium(brief_text: str) -> Optional[int]:
             return annual
 
     return None
+
+
+def _non_term_guidance(
+    profile: "CustomerProfile",
+    plan_type: str,
+    brief_text: str,
+) -> Optional[dict]:
+    """
+    For savings, ULIP, pension, child plans: cover guidance only.
+    Premiums for these products require product-specific actuarial tables.
+    The LLM is directed to use the document's premium tables directly.
+    """
+    if profile.age is None:
+        return None  # not enough profile to say anything useful
+
+    age = profile.age
+    coverage_hint = ""
+
+    if plan_type == "pension":
+        coverage_hint = f"Retirement corpus target (age {age})"
+    elif plan_type == "child":
+        coverage_hint = "Education or marriage corpus"
+    elif plan_type == "savings":
+        coverage_hint = "Maturity corpus target"
+    elif plan_type == "ulip":
+        coverage_hint = "Sum assured (market-linked component separate)"
+
+    if not coverage_hint:
+        return None
+
+    return {
+        "cover_lakh": None,
+        "cover_display": coverage_hint,
+        "cover_rationale": "refer to product document for benefit amounts",
+        "premium_display": None,
+        "premium_rationale": "premiums are product-specific — use figures from the document",
+        "premium_source": "not applicable",
+    }
 
 
 def _format_cover(cover_lakh: float) -> str:

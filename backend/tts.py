@@ -204,7 +204,7 @@ def synthesize(text: str, language_code: str = "en-IN", speaker: str | None = No
                 output_audio_codec="wav",
                 speech_sample_rate=SAMPLE_RATE,
                 enable_preprocessing=True,
-                pace=1.3,
+                pace=1.1,
             )
             return base64.b64decode(response.audios[0])
         except TTSError:

@@ -1,9 +1,6 @@
-"""Post-conversation evaluation using sarvam-m."""
+"""Post-conversation evaluation."""
 from __future__ import annotations
 
-import os
-import re
-import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -11,10 +8,6 @@ if TYPE_CHECKING:
 
 from llm import LLMClient
 from prompts import EVALUATION_PROMPT
-
-
-def _clean(text: str) -> str:
-    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
 def evaluate_session(memory: "SessionMemory", character_name: str) -> dict:
@@ -49,15 +42,8 @@ def evaluate_session(memory: "SessionMemory", character_name: str) -> dict:
     )
 
     llm = LLMClient()
-    # Use lower temperature for evaluation — we want consistent, analytical output
-    from llm import SARVAM_M
-    from dataclasses import replace
-    eval_config = replace(SARVAM_M, temperature=0.3, max_tokens=2048)
-    from llm import LLMClient as _LC
-    eval_llm = _LC(config=eval_config)
-
-    raw = eval_llm.complete([{"role": "user", "content": prompt}])
-    evaluation_text = _clean(raw)
+    raw = llm.complete([{"role": "user", "content": prompt}])
+    evaluation_text = raw.strip()
 
     return {
         "evaluation": evaluation_text,

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -16,17 +17,35 @@ def extract_text(pdf_path: str) -> str:
     return "\n\n".join(pages)
 
 
+def _extract_pages_data(pdf_path: str) -> list[dict]:
+    """Extract per-page text and tables for structure builder."""
+    pages_data = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for i, page in enumerate(pdf.pages, start=1):
+            text = page.extract_text() or ""
+            tables = page.extract_tables() or []
+            pages_data.append({"page_num": i, "text": text, "tables": tables})
+    return pages_data
+
+
+def _sha256(pdf_path: str) -> str:
+    h = hashlib.sha256()
+    with open(pdf_path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _extract_metadata(text: str) -> dict:
     """
     Extract plan_name, company_name, plan_type, one_line_pitch from the document.
-    Uses the LLM on the first 1500 chars. Falls back to safe defaults on any failure.
+    Uses OpenAI GPT-4o-mini on the first 1500 chars. Falls back to keyword extraction on failure.
     """
     import os
-    from sarvamai import SarvamAI
+    from openai import OpenAI
 
     snippet = text[:1500].strip()
 
-    # Ask for a simple key:value format — more LLM-friendly than JSON under token pressure
     prompt = (
         "You are reading an Indian insurance product brochure. "
         "Extract these four fields from the text below.\n\n"
@@ -40,19 +59,17 @@ def _extract_metadata(text: str) -> dict:
     )
 
     try:
-        key = os.getenv("SARVAM_API_KEY")
+        key = os.getenv("OPENAI_API_KEY")
         if not key:
             raise RuntimeError("no key")
-        client = SarvamAI(api_subscription_key=key)
-        resp = client.chat.completions(
+        client = OpenAI(api_key=key)
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            model="sarvam-m",
             temperature=0.1,
-            max_tokens=400,
+            max_tokens=200,
         )
-        raw = resp.choices[0].message.content or ""
-        # strip think tags — sarvam-m emits these, they can eat token budget
-        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+        raw = (resp.choices[0].message.content or "").strip()
 
         meta: dict = {}
         for line in raw.splitlines():
@@ -67,7 +84,6 @@ def _extract_metadata(text: str) -> dict:
         if meta.get("plan_type") not in valid_types:
             meta["plan_type"] = "other"
 
-        # Return only if we got the key fields
         if meta.get("plan_name") and meta.get("one_line_pitch"):
             return meta
     except Exception:
@@ -226,9 +242,9 @@ def _generate_brief_via_llm(text: str, meta: dict) -> str:
     Returns empty string on any failure so the caller can fall back gracefully.
     """
     import os
-    from sarvamai import SarvamAI
+    from openai import OpenAI
 
-    key = os.getenv("SARVAM_API_KEY")
+    key = os.getenv("OPENAI_API_KEY")
     if not key:
         return ""
 
@@ -236,8 +252,6 @@ def _generate_brief_via_llm(text: str, meta: dict) -> str:
     company = meta.get("company_name", "the insurer")
     plan_type = _detect_plan_type(text, meta.get("plan_type", "other"))
 
-    # Build a focused digest from keyword-matched sections — ~3000 chars total.
-    # This is more useful than raw first-N-chars because it spans the whole document.
     sections = {
         "Overview": text[:800].strip(),
         "Coverage and variants": _extract_section(text,
@@ -276,7 +290,7 @@ RULES:
 - Use the section labels exactly as shown below.
 - Each section: 2-4 sentences maximum. Be specific — use actual numbers from the document.
 - If a detail is absent from the document, write: not specified in document.
-- Total output must stay under 1600 characters.
+- Total output must stay under 1800 characters.
 
 PLAN: {plan_name} | COMPANY: {company} | TYPE: {plan_type}
 
@@ -286,7 +300,7 @@ PLAN: {plan_name} | COMPANY: {company} | TYPE: {plan_type}
 Write the brief using exactly these section labels (one blank line between sections):
 
 COVERAGE: what cover options exist, typical sum assured range, key variants
-PREMIUMS: what a typical customer pays; include a specific rupee example with age if available; translate to daily cost
+PREMIUMS: describe the premium payment structure only — frequency options (annual/monthly/single pay), any loading factors (smoker, age bands), and minimum premium if stated. Do NOT include illustrative rupee amounts, per-day costs, sample calculations, or "starting from" figures. Those belong in structured pricing data, not this brief.
 ELIGIBILITY: entry age range, policy term options, key health conditions that affect acceptance
 DEATH BENEFIT: how the nominee receives the payout, lump sum or income
 MATURITY BENEFIT: what the customer gets if they survive the term (write "nil for pure term plans" if none)
@@ -297,23 +311,17 @@ PITCH: one sentence — the strongest reason a customer in their 30s with depend
 """
 
     try:
-        client = SarvamAI(api_subscription_key=key)
-        resp = client.chat.completions(
+        client = OpenAI(api_key=key)
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            model="sarvam-m",
             temperature=0.3,
-            max_tokens=1800,  # think block needs ~800t; brief needs ~700t; total ~1500t
+            max_tokens=900,
         )
-        raw = resp.choices[0].message.content or ""
-        # Strip closed think tags first
-        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-        # If think tag is still open (truncated), strip everything from <think> onward
-        if "<think>" in raw:
-            raw = raw[:raw.index("<think>")].strip()
+        raw = (resp.choices[0].message.content or "").strip()
         if not raw or len(raw) < 200:
             return ""
 
-        # Prepend the standard header so agent.py can always find plan identity
         header = (
             f"PLAN: {plan_name} | COMPANY: {company}\n"
             f"TYPE: {plan_type.upper()}\n\n"
@@ -441,7 +449,10 @@ def _profiling_questions_for_type(plan_type: str) -> str:
 
 
 def ingest(pdf_path: str, index_dir: str = "data") -> tuple[int, str]:
-    """Extract text from PDF, save as .txt, .meta.json, and .brief.txt. Returns (page_count, name)."""
+    """
+    Extract text from PDF, save .txt, .meta.json, .brief.txt, .structure.json, .chunks.json.
+    Returns (page_count, name).
+    """
     name = Path(pdf_path).stem
     text = extract_text(pdf_path)
     if not text.strip():
@@ -462,6 +473,27 @@ def ingest(pdf_path: str, index_dir: str = "data") -> tuple[int, str]:
     brief_path = os.path.join(index_dir, f"{name}.brief.txt")
     with open(brief_path, "w", encoding="utf-8") as fh:
         fh.write(brief)
+
+    # ── Product Structure JSON (premium tables + eligibility) ─────────────
+    try:
+        from structure_builder import build_product_structure
+        pages_data = _extract_pages_data(pdf_path)
+        doc_hash = _sha256(pdf_path)
+        structure = build_product_structure(text, pages_data, meta, doc_hash)
+        structure_path = os.path.join(index_dir, f"{name}.structure.json")
+        with open(structure_path, "w", encoding="utf-8") as fh:
+            json.dump(structure, fh, ensure_ascii=False, indent=2)
+    except Exception:
+        pass  # structure.json is optional — quote engine handles missing file
+
+    # ── BM25 chunks JSON (section-aware retrieval) ────────────────────────
+    try:
+        from bm25_store import BM25Store
+        store = BM25Store.build(text)
+        chunks_path = os.path.join(index_dir, f"{name}.chunks.json")
+        store.save(chunks_path)
+    except Exception:
+        pass  # chunks.json is optional — rag.py falls back to keyword scorer
 
     page_count = len([p for p in text.split("\n\n") if p.strip()])
     return page_count, name

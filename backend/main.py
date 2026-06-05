@@ -39,7 +39,7 @@ from ingestion import ingest            # noqa: E402
 from pipeline import run_voice_pipeline # noqa: E402
 from rag import DocumentStore           # noqa: E402
 from stt import transcribe              # noqa: E402
-from tts import SUPPORTED_LANGUAGES, synthesize_stream  # noqa: E402
+from tts import SUPPORTED_LANGUAGES, normalize_for_tts, synthesize_stream  # noqa: E402
 from characters import CHARACTERS       # noqa: E402
 
 DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
@@ -284,10 +284,11 @@ async def speak(
     async def audio_generator() -> AsyncIterator[bytes]:
         loop = asyncio.get_event_loop()
         queue: asyncio.Queue[bytes | Exception | None] = asyncio.Queue()
+        normalized_text = normalize_for_tts(text)
 
         def _produce() -> None:
             try:
-                for chunk in synthesize_stream(text, language_code, speaker):
+                for chunk in synthesize_stream(normalized_text, language_code, speaker):
                     queue.put_nowait(chunk)
                 queue.put_nowait(None)
             except Exception as exc:

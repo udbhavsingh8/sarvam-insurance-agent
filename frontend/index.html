@@ -109,6 +109,20 @@ body {
 #status.ok { color: var(--success); }
 #status.err { color: var(--danger); }
 
+#progress-wrap {
+  display: none; margin-top: 10px;
+}
+#progress-track {
+  height: 4px; background: var(--border); border-radius: 4px; overflow: hidden;
+}
+#progress-fill {
+  height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent2));
+  border-radius: 4px; transition: width 0.5s ease;
+}
+#progress-label {
+  font-size: 11px; color: var(--accent); margin-top: 5px; text-align: center; font-weight: 500;
+}
+
 .char-grid { display: flex; flex-direction: column; gap: 8px; }
 
 .char-card {
@@ -319,26 +333,56 @@ body {
 }
 .step-text { font-size: 13px; color: var(--text2); }
 
-.bubble-row { display: flex; gap: 10px; align-items: flex-end; }
-.bubble-row.user { flex-direction: row-reverse; }
+/* ── CHAT BUBBLES ───────────────────────────────────────── */
+.bubble-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 80%;
+}
+.bubble-row.agent { align-self: flex-start; }
+.bubble-row.user  { align-self: flex-end; flex-direction: row-reverse; }
+.bubble-row.error { align-self: flex-start; }
 
 .bubble-avatar {
-  width: 30px; height: 30px; border-radius: 50%;
+  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
-  display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; margin-bottom: 18px;
 }
-.bubble-row.user .bubble-avatar { background: #E5E7EB; }
+.bubble-row.user .bubble-avatar {
+  background: #E5E7EB;
+}
+
+.bubble-body { display: flex; flex-direction: column; gap: 3px; }
+.bubble-row.user  .bubble-body { align-items: flex-end; }
+.bubble-row.agent .bubble-body { align-items: flex-start; }
 
 .bubble {
-  max-width: 65%; padding: 11px 15px; border-radius: 16px;
-  font-size: 14px; line-height: 1.6; color: var(--text); box-shadow: var(--shadow-sm);
+  padding: 10px 14px; border-radius: 18px;
+  font-size: 14px; line-height: 1.6; color: var(--text);
+  box-shadow: var(--shadow-sm); word-break: break-word;
 }
-.bubble-row.agent .bubble { background: var(--card-bg); border-bottom-left-radius: 4px; border: 1px solid var(--border); }
-.bubble-row.user  .bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
-.bubble-row.error .bubble { background: #FEF2F2; border: 1px solid #FECACA; color: var(--danger); }
+.bubble-row.agent .bubble {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+.bubble-row.user .bubble {
+  background: var(--accent);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.bubble-row.error .bubble {
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  color: var(--danger);
+  border-bottom-left-radius: 4px;
+}
 
-.bubble-time { font-size: 10px; color: var(--muted); margin-top: 3px; padding: 0 4px; text-align: right; }
-.bubble-row.user .bubble-time { text-align: left; }
+.bubble-time {
+  font-size: 10px; color: var(--muted); padding: 0 4px;
+}
 
 .interrupted-tag {
   display: inline-block; font-size: 10px; background: #FFF3CD; color: #92400E;
@@ -487,8 +531,12 @@ body {
       <div class="dz-sub">or click to browse</div>
       <input type="file" id="file-input" accept=".pdf"/>
     </div>
-    <button id="upload-btn" disabled>Upload &amp; Ingest</button>
+    <button id="upload-btn" disabled>Upload Policy Document</button>
     <div id="status">Choose a PDF to get started</div>
+    <div id="progress-wrap">
+      <div id="progress-track"><div id="progress-fill"></div></div>
+      <div id="progress-label"></div>
+    </div>
   </div>
 
   <div class="sidebar-section">
@@ -498,22 +546,10 @@ body {
         <div class="char-avatar">🧑‍💼</div>
         <div class="char-info">
           <div class="char-name">Arjun</div>
-          <div class="char-desc">Professional · Hindi / English</div>
+          <div class="char-desc">Available</div>
         </div>
         <div class="char-check">
           <svg width="10" height="10" fill="none" viewBox="0 0 12 12">
-            <path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
-          </svg>
-        </div>
-      </div>
-      <div class="char-card" id="char-lalita" onclick="selectChar('lalita',this)">
-        <div class="char-avatar">👩‍💼</div>
-        <div class="char-info">
-          <div class="char-name">Lalita</div>
-          <div class="char-desc">Empathetic · South Indian</div>
-        </div>
-        <div class="char-check">
-          <svg width="10" height="10" fill="none" viewBox="0 0 12 12" style="display:none">
             <path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
           </svg>
         </div>
@@ -531,22 +567,7 @@ body {
     </button>
   </div>
 
-  <div class="sidebar-section" id="intel-section" style="display:none">
-    <div class="section-label">Live Intelligence</div>
-    <div class="intel-row">
-      <span class="intel-key">Stage</span>
-      <span id="stage-badge">GREETING</span>
-    </div>
-    <div class="intel-row">
-      <span class="intel-key">Language</span>
-      <span id="lang-badge-sidebar">English</span>
-    </div>
-    <div id="profile-progress" style="display:none">
-      <div class="section-label" style="margin-top:10px">Customer Profile</div>
-      <div id="profile-chips" class="profile-chips">
-        <span class="profile-empty">No data collected yet</span>
-      </div>
-    </div>
+  <div id="session-actions" style="display:none;padding:0 16px 14px">
     <button id="eval-btn" onclick="runEvaluation()">Evaluate Session</button>
     <button id="transcript-btn" onclick="openTranscript()">View Transcript</button>
   </div>
@@ -663,8 +684,7 @@ const LANG_NAMES = {
   "gu-IN":"Gujarati","pa-IN":"Punjabi"
 };
 const CHAR_INFO = {
-  arjun:  { emoji: "🧑‍💼", name: "Arjun" },
-  lalita: { emoji: "👩‍💼", name: "Lalita" },
+  arjun: { emoji: "🧑‍💼", name: "Arjun" },
 };
 
 let sessionId = null;
@@ -751,7 +771,6 @@ function updateStageBadge(stage) {
 function updateLangBadge(code) {
   const name = LANG_NAMES[code] || "English";
   document.getElementById("lang-badge").textContent = name.slice(0,2).toUpperCase();
-  document.getElementById("lang-badge-sidebar").textContent = name;
 }
 
 // ── Character select ─────────────────────────────────────────
@@ -814,8 +833,46 @@ uploadBtn.addEventListener("click", async () => {
   }
 });
 
+const _PROGRESS_STEPS = [
+  { pct: 15, label: "Reading document…" },
+  { pct: 35, label: "Extracting content…" },
+  { pct: 55, label: "Building knowledge base…" },
+  { pct: 72, label: "Preparing sales brief…" },
+  { pct: 88, label: "Almost ready…" },
+];
+let _progressTimer = null;
+let _progressStep = 0;
+
+function startProgressAnimation() {
+  _progressStep = 0;
+  document.getElementById("progress-wrap").style.display = "block";
+  setProgress(5, "Getting ready…");
+  _progressTimer = setInterval(() => {
+    if (_progressStep < _PROGRESS_STEPS.length) {
+      const s = _PROGRESS_STEPS[_progressStep++];
+      setProgress(s.pct, s.label);
+    }
+  }, 2200);
+}
+
+function setProgress(pct, label) {
+  document.getElementById("progress-fill").style.width = pct + "%";
+  document.getElementById("progress-label").textContent = label;
+}
+
+function stopProgressAnimation(success) {
+  clearInterval(_progressTimer);
+  if (success) {
+    setProgress(100, "✓ Ready");
+    setTimeout(() => { document.getElementById("progress-wrap").style.display = "none"; }, 1800);
+  } else {
+    document.getElementById("progress-wrap").style.display = "none";
+  }
+}
+
 function pollJob(jobId) {
-  setStatus("Ingesting PDF…", "");
+  setStatus("", "");
+  startProgressAnimation();
   pollTimer = setInterval(async () => {
     try {
       const r = await fetch("/status/" + jobId);
@@ -823,14 +880,16 @@ function pollJob(jobId) {
       if (j.status === "done") {
         clearInterval(pollTimer);
         sessionId = j.session_id;
+        stopProgressAnimation(true);
         setStatus("✓ Ready — " + j.chunk_count + " pages", "ok");
         document.getElementById("start-btn").disabled = false;
-        document.getElementById("intel-section").style.display = "block";
+        document.getElementById("session-actions").style.display = "block";
         document.getElementById("eval-btn").style.display = "block";
         document.getElementById("transcript-btn").style.display = "block";
       } else if (j.status === "failed") {
         clearInterval(pollTimer);
-        setStatus("Ingestion failed: " + j.error, "err");
+        stopProgressAnimation(false);
+        setStatus("Processing failed: " + j.error, "err");
         uploadBtn.disabled = false;
       }
     } catch {}
@@ -847,6 +906,14 @@ document.getElementById("start-btn").addEventListener("click", async () => {
   if (!sessionId) return;
   document.getElementById("start-btn").disabled = true;
   document.querySelectorAll(".char-card").forEach(c => c.style.pointerEvents = "none");
+
+  // Unlock browser autoplay policy synchronously inside the user-gesture handler.
+  // After any await the gesture context expires and audio.play() is silently blocked.
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    ctx.resume();
+  } catch (_) {}
+
 
   document.getElementById("welcome-screen").style.display = "none";
   document.getElementById("chat-window").style.display = "flex";
@@ -897,7 +964,7 @@ function appendAgentBubble(text) {
   const info = CHAR_INFO[selectedChar];
   row.innerHTML = `
     <div class="bubble-avatar">${info.emoji}</div>
-    <div>
+    <div class="bubble-body">
       <div class="bubble">${escHtml(text)}</div>
       <div class="bubble-time">${timeNow()}</div>
     </div>`;
@@ -913,13 +980,12 @@ function appendAgentBubbleStreaming() {
   const info = CHAR_INFO[selectedChar];
   row.innerHTML = `
     <div class="bubble-avatar">${info.emoji}</div>
-    <div>
+    <div class="bubble-body">
       <div class="bubble"></div>
       <div class="bubble-time">${timeNow()}</div>
     </div>`;
   win.insertBefore(row, document.getElementById("thinking-indicator"));
   scrollBottom();
-  // Return the inner bubble div directly — avoids stale getElementById across turns
   return row.querySelector(".bubble");
 }
 
@@ -928,11 +994,11 @@ function appendUserBubble(text) {
   const row = document.createElement("div");
   row.className = "bubble-row user";
   row.innerHTML = `
-    <div>
+    <div class="bubble-avatar" style="background:#E5E7EB;color:#374151">👤</div>
+    <div class="bubble-body">
       <div class="bubble">${escHtml(text)}</div>
       <div class="bubble-time">${timeNow()}</div>
-    </div>
-    <div class="bubble-avatar" style="background:#E5E7EB;color:#374151">👤</div>`;
+    </div>`;
   win.insertBefore(row, document.getElementById("thinking-indicator"));
   scrollBottom();
 }
@@ -945,7 +1011,7 @@ function showBubbleError(message) {
   row.className = "bubble-row error";
   row.innerHTML = `
     <div class="bubble-avatar" style="background:#FEF2F2">⚠️</div>
-    <div>
+    <div class="bubble-body">
       <div class="bubble">${escHtml(message)}
         <button class="retry-btn" onclick="retryLast()">Retry</button>
       </div>
@@ -1006,6 +1072,9 @@ async function voicePipeline(message, sttLatencyMs) {
           const blob = new Blob(audioBlobs, { type: "audio/wav" });
           audioBlobs = [];
           queueAudio(blob);
+        } else {
+          // No audio received from server (TTS API quota exhausted) — fall back to browser TTS
+          if (streamText) browserSpeak(streamText);
         }
 
       } else if (msg.type === "preparing_audio") {
@@ -1055,20 +1124,49 @@ function playNextAudio() {
 function interruptAgent() {
   if (currentWs) { try { currentWs.close(); } catch {} currentWs = null; }
   if (currentAudioEl) { currentAudioEl.pause(); currentAudioEl = null; }
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
   activeAudioQueue = [];
   setSpeakingState(false);
   setThinkingState(false);
 }
 
+function browserSpeak(text) {
+  if (!text || !window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.rate = 1.05;
+  utt.pitch = 1.0;
+  // Pick an Indian English voice if available, otherwise default
+  const voices = window.speechSynthesis.getVoices();
+  const preferred = voices.find(v => v.lang === "en-IN") ||
+                    voices.find(v => v.lang.startsWith("en") && v.name.toLowerCase().includes("male")) ||
+                    voices.find(v => v.lang.startsWith("en"));
+  if (preferred) utt.voice = preferred;
+  utt.onstart  = () => setSpeakingState(true);
+  utt.onend    = () => { setSpeakingState(false); setIdleState("Online"); };
+  utt.onerror  = () => { setSpeakingState(false); setIdleState("Online"); };
+  window.speechSynthesis.speak(utt);
+}
+
 function playTTS(text) {
   if (!text || !sessionId) return;
   const url = `/speak?text=${encodeURIComponent(text)}&session_id=${sessionId}`;
-  const audio = new Audio(url);
-  currentAudioEl = audio;
   setSpeakingState(true);
-  audio.onended = () => { currentAudioEl = null; setSpeakingState(false); setIdleState("Online"); };
-  audio.onerror = () => { currentAudioEl = null; setSpeakingState(false); setIdleState("Online"); };
-  audio.play().catch(() => {});
+  fetch(url)
+    .then(r => {
+      if (!r.ok) throw new Error("TTS API error");
+      return r.blob();
+    })
+    .then(blob => {
+      if (!blob || blob.size < 100) throw new Error("Empty audio");
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+      currentAudioEl = audio;
+      audio.onended = () => { URL.revokeObjectURL(audioUrl); currentAudioEl = null; setSpeakingState(false); setIdleState("Online"); };
+      audio.onerror = () => { URL.revokeObjectURL(audioUrl); currentAudioEl = null; browserSpeak(text); };
+      audio.play().catch(() => browserSpeak(text));
+    })
+    .catch(() => browserSpeak(text));
 }
 
 // ── Microphone ───────────────────────────────────────────────

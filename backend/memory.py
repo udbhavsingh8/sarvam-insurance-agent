@@ -58,12 +58,42 @@ class CustomerProfile:
     financial_goal: Optional[str] = None  # protection | savings | both | retirement | child
     income_range: Optional[str] = None    # monthly income bracket
     health_conditions: Optional[str] = None   # none | pre-existing
+    # Quote-specific fields (Phase 1B/1C)
+    policy_term: Optional[int] = None          # requested policy term in years
+    payment_frequency: Optional[str] = None   # annual | semi_annual | quarterly | monthly
+    liabilities_lakh: Optional[float] = None  # outstanding loans in lakh
+    cover_amount_override_lakh: Optional[float] = None  # customer-stated explicit cover
     fields_collected: list[str] = field(default_factory=list)
 
-    def is_sufficient(self) -> bool:
-        """True once at least 4 key fields are known."""
-        key_fields = [self.age, self.gender, self.dependents, self.existing_coverage, self.financial_goal]
-        return sum(1 for f in key_fields if f is not None) >= 4
+    def is_sufficient(self, plan_type: str = "other") -> bool:
+        """
+        True once the minimum profile fields for a meaningful recommendation are known.
+
+        Criteria are intentionally minimal — only fields a customer naturally states
+        in conversation. Gender and financial_goal are not required; they are rarely
+        volunteered and their absence should not block stage progression.
+        """
+        if self.age is None:
+            return False
+
+        has_family_context = (
+            self.dependents is not None or self.marital_status is not None
+        )
+
+        if plan_type == "term":
+            # Term plans need: age, smoker status, income, and family context.
+            return (
+                self.smoker is not None
+                and self.income_range is not None
+                and has_family_context
+            )
+
+        if plan_type == "health":
+            # Health plans need: age, family context, income.
+            return has_family_context and self.income_range is not None
+
+        # All other plan types: age + income is sufficient to proceed.
+        return self.income_range is not None
 
     def apply_updates(self, updates: dict) -> None:
         """Apply a dict of profile fields extracted by profile_extractor."""
@@ -91,6 +121,22 @@ class CustomerProfile:
             self.gender = updates["gender"]
             if "gender" not in self.fields_collected:
                 self.fields_collected.append("gender")
+        if "policy_term" in updates and self.policy_term is None:
+            self.policy_term = updates["policy_term"]
+            if "policy_term" not in self.fields_collected:
+                self.fields_collected.append("policy_term")
+        if "payment_frequency" in updates and self.payment_frequency is None:
+            self.payment_frequency = updates["payment_frequency"]
+            if "payment_frequency" not in self.fields_collected:
+                self.fields_collected.append("payment_frequency")
+        if "liabilities_lakh" in updates and self.liabilities_lakh is None:
+            self.liabilities_lakh = updates["liabilities_lakh"]
+            if "liabilities_lakh" not in self.fields_collected:
+                self.fields_collected.append("liabilities_lakh")
+        if "cover_amount_override_lakh" in updates and self.cover_amount_override_lakh is None:
+            self.cover_amount_override_lakh = updates["cover_amount_override_lakh"]
+            if "cover_amount_override_lakh" not in self.fields_collected:
+                self.fields_collected.append("cover_amount_override_lakh")
 
     def summary(self) -> str:
         if not self.fields_collected:
@@ -114,6 +160,14 @@ class CustomerProfile:
             lines.append(f"Income range: {self.income_range}")
         if self.health_conditions:
             lines.append(f"Health: {self.health_conditions}")
+        if self.policy_term is not None:
+            lines.append(f"Policy term: {self.policy_term} years")
+        if self.payment_frequency:
+            lines.append(f"Payment frequency: {self.payment_frequency}")
+        if self.liabilities_lakh is not None:
+            lines.append(f"Outstanding loans: ₹{self.liabilities_lakh:.0f} lakh")
+        if self.cover_amount_override_lakh is not None:
+            lines.append(f"Requested cover: ₹{self.cover_amount_override_lakh:.0f} lakh")
         return "\n".join(lines)
 
 
@@ -172,6 +226,10 @@ class SessionMemory:
     return_to_stage: Optional[str] = None   # set when entering QUESTION_ANSWER
     turn_in_stage: int = 0
 
+    # ── Close substage machine (active only when stage == "CLOSE") ──
+    # SUMMARY → PURCHASE_INTENT → PROCEED or FEEDBACK → CLOSED
+    close_substage: str = "SUMMARY"
+
     # ── Customer emotional state (updated every turn from META tag) ──
     emotional_state: str = "curious"  # curious | engaged | hesitant | resistant | anxious | satisfied
 
@@ -207,31 +265,19 @@ class SessionMemory:
 
     def update_language(self, language_code: str, confidence: float) -> None:
         """
-        Commit a language change only when we have strong evidence.
+        Commit a language change on reasonable evidence.
 
         Rules:
-        - Single detection at confidence ≥ 0.85 → commit immediately.
-        - Detection at 0.7–0.84 → store as candidate; commit only if the
-          next detection also matches (two consecutive agreements).
-        - Below 0.7 or empty code → ignored.
+        - Single detection at confidence ≥ 0.70 → commit immediately.
+        - Below 0.70 or empty code → ignored.
         """
         if not language_code or confidence < 0.7:
             return
-        if confidence >= 0.85:
-            self.detected_language = language_code
-            self.language_confidence = confidence
-            self._language_candidate = ""
-            self._language_candidate_confidence = 0.0
-        elif language_code == self._language_candidate:
-            # Second consecutive detection of the same language at ≥ 0.7 — commit
-            self.detected_language = language_code
-            self.language_confidence = confidence
-            self._language_candidate = ""
-            self._language_candidate_confidence = 0.0
-        else:
-            # First detection at 0.7–0.84 — hold as candidate, wait for confirmation
-            self._language_candidate = language_code
-            self._language_candidate_confidence = confidence
+        # Commit immediately at ≥ 0.70 — single detection is enough
+        self.detected_language = language_code
+        self.language_confidence = confidence
+        self._language_candidate = ""
+        self._language_candidate_confidence = 0.0
 
     def log_turn(self, role: str, text: str) -> None:
         self.turn_log.append({

@@ -58,6 +58,26 @@ def extract_profile_fields(text: str) -> dict:
     if gender is not None:
         result["gender"] = gender
 
+    # ── Policy term ───────────────────────────────────────────────────────
+    policy_term = _extract_policy_term(t)
+    if policy_term is not None:
+        result["policy_term"] = policy_term
+
+    # ── Payment frequency ─────────────────────────────────────────────────
+    frequency = _extract_payment_frequency(t)
+    if frequency is not None:
+        result["payment_frequency"] = frequency
+
+    # ── Liabilities ───────────────────────────────────────────────────────
+    liabilities = _extract_liabilities(t)
+    if liabilities is not None:
+        result["liabilities_lakh"] = liabilities
+
+    # ── Cover override ────────────────────────────────────────────────────
+    cover = _extract_cover_override(t)
+    if cover is not None:
+        result["cover_amount_override_lakh"] = cover
+
     return result
 
 
@@ -114,10 +134,13 @@ def _extract_income(t: str) -> Optional[str]:
     if m:
         return f"{m.group(1)} LPA"
 
-    # "15 lakhs" / "15 lakh" (standalone, likely annual)
+    # "15 lakhs" / "15 lakh" (standalone, likely annual) — skip if preceded by loan/liability words
     m = re.search(r"(\d+(?:\.\d+)?)\s*lakh(?:s)?", t)
     if m:
-        return f"{m.group(1)} lakh"
+        start = max(0, m.start() - 30)
+        context = t[start:m.start()]
+        if not re.search(r"loan|emi|debt|mortgage|liability|outstanding", context):
+            return f"{m.group(1)} lakh"
 
     # Monthly: "50,000 per month", "50k per month", "50000 monthly"
     m = re.search(r"([\d,]+)(?:k)?\s*(?:per\s+month|monthly|\/month|pm\b)", t)
@@ -172,10 +195,74 @@ def _extract_marital(t: str) -> Optional[str]:
 
 
 def _extract_gender(t: str) -> Optional[str]:
-    # Infer from pronouns/context — only set when unambiguous
     if any(p in t for p in ["i'm a woman", "i am a woman", "i'm female", "i am female"]):
         return "female"
     if any(p in t for p in ["i'm a man", "i am a man", "i'm male", "i am male"]):
         return "male"
-    # "my wife" / "my husband" doesn't tell us about the customer — skip
+    return None
+
+
+def _extract_policy_term(t: str) -> Optional[int]:
+    """Extract policy term in years from utterances like '20 year term', 'for 30 years'."""
+    patterns = [
+        r"(\d{1,2})[- ]year(?:s)?[- ](?:term|policy|plan|cover)",
+        r"(?:term|policy|cover)\s+(?:of\s+)?(\d{1,2})\s+years?",
+        r"for\s+(\d{1,2})\s+years?\s+(?:term|policy|plan|cover)",
+        r"(\d{1,2})\s+yr\s+(?:term|plan|policy)",
+    ]
+    for p in patterns:
+        m = re.search(p, t)
+        if m:
+            val = int(m.group(1))
+            if 5 <= val <= 50:
+                return val
+    return None
+
+
+def _extract_payment_frequency(t: str) -> Optional[str]:
+    """Detect payment frequency preference."""
+    if any(p in t for p in ["monthly", "every month", "per month", "month by month"]):
+        return "monthly"
+    if any(p in t for p in ["quarterly", "every quarter", "every three months"]):
+        return "quarterly"
+    if any(p in t for p in ["semi-annual", "semi annual", "half yearly", "half-yearly", "every six months", "twice a year"]):
+        return "semi_annual"
+    if any(p in t for p in ["annual", "yearly", "once a year", "every year", "per year"]):
+        return "annual"
+    return None
+
+
+def _extract_liabilities(t: str) -> Optional[float]:
+    """Extract outstanding loans or liabilities in lakh."""
+    patterns = [
+        r"(?:home\s+loan|loan|emi|liability|liabilities|mortgage|debt)\s+of\s+(?:₹\s*)?([\d.]+)\s*(lakh|crore|cr|l\b)",
+        r"(?:₹\s*)?([\d.]+)\s*(lakh|crore|cr)\s+(?:loan|emi|debt|mortgage)",
+        r"outstanding\s+(?:₹\s*)?([\d.]+)\s*(lakh|crore|cr)",
+    ]
+    for p in patterns:
+        m = re.search(p, t)
+        if m:
+            val = float(m.group(1))
+            unit = m.group(2).lower()
+            if "crore" in unit or unit == "cr":
+                return val * 100
+            return val
+    return None
+
+
+def _extract_cover_override(t: str) -> Optional[float]:
+    """Extract explicit cover amount stated by customer ('I want 2 crore cover')."""
+    patterns = [
+        r"(?:want|need|looking\s+for|give\s+me)\s+(?:₹\s*)?([\d.]+)\s*(crore|cr|lakh|l\b)\s+(?:cover|sum\s+assured|life\s+cover|insurance)",
+        r"(?:cover|sum\s+assured)\s+of\s+(?:₹\s*)?([\d.]+)\s*(crore|cr|lakh|l\b)",
+        r"(?:₹\s*)?([\d.]+)\s*(crore|cr|lakh)\s+(?:cover|sum\s+assured|life\s+cover)",
+    ]
+    for p in patterns:
+        m = re.search(p, t)
+        if m:
+            val = float(m.group(1))
+            unit = m.group(2).lower()
+            if "crore" in unit or unit == "cr":
+                return val * 100
+            return val
     return None

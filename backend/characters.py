@@ -52,7 +52,7 @@ CHARACTERS: dict[str, dict] = {
 
         "opener": "",  # not used — generate_opener() builds this dynamically from document
 
-        "voice": "aditya",
+        "voice": "dev",
     },
 
     "lalita": {

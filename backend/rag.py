@@ -1,7 +1,8 @@
+import os
 import re
 from ingestion import load_document, load_metadata, load_sales_brief
 
-CHUNK_SIZE = 600    # chars per chunk
+CHUNK_SIZE = 600    # chars per chunk (fallback keyword scorer)
 TOP_K      = 4      # chunks to include in context
 
 
@@ -31,17 +32,45 @@ class DocumentStore:
         self.name = name
         self.metadata: dict = load_metadata(index_dir, name)
         self.sales_brief: str = load_sales_brief(index_dir, name)
-        self._chunks = _make_chunks(self.text)
+
+        # Load BM25 index if available; otherwise fall back to keyword scorer.
+        self._bm25: object | None = None
+        chunks_path = os.path.join(index_dir, f"{name}.chunks.json")
+        if os.path.exists(chunks_path):
+            try:
+                from bm25_store import BM25Store
+                self._bm25 = BM25Store.load(chunks_path)
+            except Exception:
+                pass
+
+        # Fallback: simple keyword scorer over plain chunks
+        self._chunks = _make_chunks(self.text) if self._bm25 is None else []
+
+        # Load structure.json for quote engine (optional)
+        structure_path = os.path.join(index_dir, f"{name}.structure.json")
+        if os.path.exists(structure_path):
+            try:
+                import json
+                with open(structure_path, encoding="utf-8") as fh:
+                    self.structure: dict = json.load(fh)
+            except Exception:
+                self.structure = {}
+        else:
+            self.structure = {}
 
     def retrieve(self, query: str, top_k: int = TOP_K) -> str:
+        if self._bm25 is not None:
+            return self._bm25.retrieve(query, top_k=top_k)
+
+        # Keyword scorer fallback
         scored = sorted(
             self._chunks, key=lambda c: _score(c, query), reverse=True
         )
         top = scored[:top_k]
         if not any(_score(c, query) > 0 for c in top):
-            # no keyword match — return first top_k chunks (product overview)
             top = self._chunks[:top_k]
         return "\n\n---\n\n".join(top)
 
     def get_context(self, query: str = "", top_k: int = TOP_K) -> str:
-        return self.retrieve(query, top_k=top_k) if query else self.retrieve("insurance policy benefits coverage", top_k=top_k)
+        q = query if query else "insurance policy benefits coverage"
+        return self.retrieve(q, top_k=top_k)
