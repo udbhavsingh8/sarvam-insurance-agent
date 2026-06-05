@@ -74,24 +74,15 @@ class CustomerProfile:
         """
         True when DISCOVERY has collected enough to move to the next stage.
 
-        Term plans (GAP_CALC next): age + income + family context.
-          Smoker is NOT required to advance — it's asked during VARIANTS.
-          Liabilities and existing cover are optional (default to 0 in gap calc).
+        Gate: age + income_range only. Family context (dependents/marital) is
+        collected conversationally but NOT a gate — regex extractors are too
+        brittle for the infinite ways people describe family ("my son", "mera
+        beta", "we are a family of four"). Gating on it causes stage lockup.
 
-        Savings / other plans (RECOMMEND next): age + income.
+        Smoker, liabilities, existing cover, years_of_support are optional
+        enrichment — the gap engine has sensible defaults for all of them.
         """
-        if self.age is None or self.income_range is None:
-            return False
-
-        has_family_context = (
-            self.dependents is not None or self.marital_status is not None
-        )
-
-        if plan_type == "term":
-            return has_family_context
-
-        # savings / health / ulip / pension / other
-        return True
+        return self.age is not None and self.income_range is not None
 
     def gap_calc_inputs_ready(self) -> bool:
         """True if we have enough for the gap calculation (age + income at minimum)."""

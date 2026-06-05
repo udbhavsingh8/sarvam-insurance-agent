@@ -94,6 +94,25 @@ def extract_profile_fields(text: str) -> dict:
 
 # ── Extractors ────────────────────────────────────────────────────────────
 
+_WORD_AGES: dict[str, int] = {
+    "eighteen": 18, "nineteen": 19,
+    "twenty": 20, "twenty one": 21, "twenty two": 22, "twenty three": 23,
+    "twenty four": 24, "twenty five": 25, "twenty six": 26, "twenty seven": 27,
+    "twenty eight": 28, "twenty nine": 29,
+    "thirty": 30, "thirty one": 31, "thirty two": 32, "thirty three": 33,
+    "thirty four": 34, "thirty five": 35, "thirty six": 36, "thirty seven": 37,
+    "thirty eight": 38, "thirty nine": 39,
+    "forty": 40, "forty one": 41, "forty two": 42, "forty three": 43,
+    "forty four": 44, "forty five": 45, "forty six": 46, "forty seven": 47,
+    "forty eight": 48, "forty nine": 49,
+    "fifty": 50, "fifty one": 51, "fifty two": 52, "fifty three": 53,
+    "fifty four": 54, "fifty five": 55,
+    # Hindi word-forms from STT
+    "battees": 32, "batees": 32, "teees": 30, "pachees": 25,
+    "tees": 30, "saintees": 37, "sattatees": 37,
+}
+
+
 def _extract_age(t: str) -> Optional[int]:
     patterns = [
         r"\bi(?:'?m| am)\s+(\d{1,2})\b",          # "I'm 29", "I am 32"
@@ -101,6 +120,8 @@ def _extract_age(t: str) -> Optional[int]:
         r"\b(\d{1,2})[\s-]year(?:s)?[\s-]old\b",   # "29-year-old", "32 years old"
         r"\bturned\s+(\d{1,2})\b",                  # "just turned 35"
         r"\b(\d{1,2})\s+years?\s+of\s+age\b",       # "29 years of age"
+        # Hindi: "मेरी उम्र 32 है", "umar 32", "umra 35"
+        r"\b(?:meri\s+)?umar[a]?\s+(?:hai\s+)?(\d{1,2})\b",
     ]
     for p in patterns:
         m = re.search(p, t)
@@ -108,6 +129,25 @@ def _extract_age(t: str) -> Optional[int]:
             val = int(m.group(1))
             if 18 <= val <= 75:
                 return val
+
+    # Word-form ages from STT ("thirty two years", "thirty-two")
+    # Sort longest phrase first so "thirty two" matches before "thirty"
+    for phrase, val in sorted(_WORD_AGES.items(), key=lambda x: -len(x[0])):
+        if re.search(rf'\b{re.escape(phrase)}\b', t):
+            return val
+
+    # Bare "32 years" or "32" when nothing else suspicious in the sentence
+    # (exclude if "for", "next", "loan", "term", "policy", "support" appears nearby)
+    m = re.search(r'\b(\d{1,2})\s+years?\b', t)
+    if m:
+        val = int(m.group(1))
+        start = max(0, m.start() - 25)
+        ctx = t[start : m.end() + 25]
+        if 18 <= val <= 75 and not re.search(
+            r'\b(?:for|next|past|last|loan|emi|term|policy|support|more|ago)\b', ctx
+        ):
+            return val
+
     return None
 
 
@@ -185,17 +225,32 @@ def _extract_dependents(t: str) -> Optional[int]:
     word_nums = {"no": 0, "zero": 0, "one": 1, "two": 2, "three": 3,
                  "four": 4, "five": 5, "six": 6}
 
-    # Family-member phrases that imply exactly 1 dependent
-    # e.g. "my father is dependent on me", "my mother depends on me"
+    # Children always count as dependents — no dependency marker required.
+    # "my son", "my daughter", "I have a son/daughter", "mera beta/beti"
+    child_phrases = [
+        "my son", "my daughter", "my child", "my kids", "my children",
+        "i have a son", "i have a daughter", "i have a child",
+        "a son", "a daughter",           # "I have a son/daughter"
+        " son ", " son.", " son,",       # "my wife and son depend on me"
+        " daughter ", " daughter.", " daughter,",
+        "mera beta", "meri beti",        # Hindi: my son/daughter
+        "mera bacha", "mere bacche",     # Hindi: my child/children
+        "मेरा बेटा", "मेरी बेटी",
+        "मेरा बच्चा", "मेरे बच्चे",
+    ]
+    for phrase in child_phrases:
+        if phrase.lower() in t:
+            return 1
+
+    # Other family-member phrases require a dependency marker
     one_dependent_phrases = [
         "my father", "my mother", "my parent", "my spouse", "my wife", "my husband",
         "my sister", "my brother", "my grandmother", "my grandfather",
         "मेरे पिता", "मेरी माँ", "मेरी माता", "मेरे माता-पिता",
     ]
-    # Only count as 1 dependent if also "dependent on me / depends on me / rely on me"
     dependency_markers = ["dependent on me", "depends on me", "rely on me", "relies on me",
                           "निर्भर है", "dependent hai", "support karta"]
-    text_lower_full = t  # already lowercased
+    text_lower_full = t
     has_dependency_marker = any(m in text_lower_full for m in dependency_markers)
     if has_dependency_marker:
         for phrase in one_dependent_phrases:
@@ -315,19 +370,38 @@ def _extract_years_of_support(t: str) -> Optional[int]:
     t_norm = re.sub(r"साल\s+तक|साल\s+के\s+लिए|साल\s+support|साल\s+तक\s+cover", "years support", t)
     t_norm = re.sub(r"साल|वर्ष", "years", t_norm)
 
-    patterns = [
+    # Loan/payment context guard — "for N years" on a loan means loan term, not support years
+    _LOAN_CTX = re.compile(r'\b(?:loan|emi|debt|mortgage|payment|pay|installment|repay)\b', re.IGNORECASE)
+
+    # Patterns ordered: most specific first (support/protect verbs) before bare "for N years"
+    specific_patterns = [
         r"(?:support|protect|provide|cover|secure)\s+(?:family|them|my\s+family)?\s*(?:for\s+)?(?:the\s+)?(?:next\s+)?(\d{1,2})\s*years?",
-        r"(?:next|for)\s+(\d{1,2})\s*years?",
+        r"\bnext\s+(\d{1,2})\s*years?\b",
         r"(\d{1,2})\s*(?:more\s+)?years?\s+(?:of\s+)?(?:support|protection|cover)",
         r"(\d{1,2})\s*years?\s+support",
-        r"till\s+(?:they|my\s+(?:kids?|children|wife|spouse|family))\s+(?:are|turn|become)\s+(\d{2})",  # "till kids are 25" — handled separately
     ]
-    for p in patterns[:-1]:
+    for p in specific_patterns:
         m = re.search(p, t_norm)
         if m:
             val = int(m.group(1))
             if 5 <= val <= 45:
                 return val
+
+    # "for N years" only when no loan/EMI context within 40 chars before the match
+    m = re.search(r'\bfor\s+(\d{1,2})\s*years?\b', t_norm)
+    if m:
+        val = int(m.group(1))
+        if 5 <= val <= 45:
+            pre = t_norm[max(0, m.start() - 40) : m.start()]
+            if not _LOAN_CTX.search(pre):
+                return val
+
+    # Hindi range: "15 से 20 साल" / "15 से 20 years" → take lower bound (conservative)
+    m = re.search(r'(\d{1,2})\s*(?:से|to)\s*\d{1,2}\s*years?', t_norm)
+    if m:
+        val = int(m.group(1))
+        if 5 <= val <= 45:
+            return val
 
     # "till kids are 25" — infer from age: we don't know kids' age, store raw only if >5
     m = re.search(r"till\s+(?:they|kids?|children|spouse|wife|husband)\s+(?:are|turn)\s+(\d{2})", t_norm)

@@ -535,21 +535,28 @@ class AgentSession:
                 )
             else:
                 missing: list[str] = []
-                if p.age is None:
-                    missing.append("age")
                 if p.dependents is None and p.marital_status is None:
-                    missing.append("family situation (who depends on you financially)")
+                    missing.append("who at home depends on your income")
                 if p.liabilities_lakh is None:
-                    missing.append("any outstanding loans or EMIs")
+                    missing.append("outstanding loans or EMIs (and amount)")
                 if p.existing_coverage is None and p.existing_cover_lakh is None:
                     missing.append("existing life insurance (if any)")
                 if p.years_of_support is None:
-                    missing.append("how many years of income support the family would need")
+                    missing.append("how many years the family would need support")
                 if missing:
                     missing_fields_line = (
                         f"\nSTILL TO COLLECT IN DISCOVERY: {', '.join(missing)}.\n"
                         f"Ask naturally — max 2 questions per turn. "
-                        f"Do NOT discuss the product, premiums, or cover amounts yet.\n"
+                        f"Do NOT ask about smoker status, product features, or cover amounts.\n"
+                    )
+                else:
+                    # All key fields collected — tell the LLM to stop asking and bridge
+                    missing_fields_line = (
+                        "\nDISCOVERY COMPLETE: All key information has been collected.\n"
+                        "DO NOT ask any more questions — not smoker status, not permissions.\n"
+                        "Say ONE natural bridge sentence: 'ठीक है, let me work through the numbers' "
+                        "or 'Great, let me now calculate what cover you need.' Then stop.\n"
+                        "Python will advance the stage automatically.\n"
                     )
 
         # ── GAP_CALC block — inject at GAP_CALC stage ──────────────────────
