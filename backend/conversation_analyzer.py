@@ -163,6 +163,10 @@ def apply_analysis(
             memory.previous_stage = current
             memory.stage = requested
             memory.turn_in_stage = 0
+            # VARIANTS → CLOSE: the assumptive close was already asked in VARIANTS.
+            # PURCHASE_INTENT is redundant — jump directly to PROCEED.
+            if current == "VARIANTS" and requested == "CLOSE":
+                memory.close_substage = "PROCEED"
 
         # All other LLM transition requests are blocked
         else:

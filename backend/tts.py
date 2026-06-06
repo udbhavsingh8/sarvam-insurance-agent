@@ -151,9 +151,15 @@ def normalize_for_tts(text: str) -> str:
     )
 
     # ── 5. Acronyms / abbreviations ──────────────────────────────────────
-    # These must be expanded BEFORE product-name substitutions to avoid
-    # partial matches. Spell out letter by letter with spaces so the TTS
-    # engine pronounces each character individually.
+    # Handle plural forms first (EMIs, ULIPs) before the singular loop.
+    _ACRONYM_PLURALS = {
+        "EMIs":   "E M I s",
+        "ULIPs":  "U L I P s",
+        "SIPs":   "S I P s",
+    }
+    for abbr, spoken in _ACRONYM_PLURALS.items():
+        text = re.sub(rf"\b{re.escape(abbr)}\b", spoken, text)
+
     _ACRONYMS = {
         "LIC":   "L I C",
         "HDFC":  "H D F C",
@@ -246,11 +252,13 @@ def normalize_for_tts(text: str) -> str:
     # Clean up any double spaces introduced
     text = re.sub(r'  +', ' ', text).strip()
 
-    # Percentages: 15% → fifteen percent
+    # Percentages: 15% → fifteen percent, 100% → one hundred percent
     def _pct(m: re.Match) -> str:
         n = int(m.group(1))
-        return f"{_int_to_words(n)} percent"
-    text = re.sub(r'\b(\d{1,2})%', _pct, text)
+        if n == 100:
+            return "one hundred percent"
+        return f"{_int_to_words(n) if n < 100 else n} percent"
+    text = re.sub(r'\b(\d{1,3})%', _pct, text)
 
     # Plain Indian-format large numbers not caught above (e.g. "1,00,000")
     def _plain_num(m: re.Match) -> str:

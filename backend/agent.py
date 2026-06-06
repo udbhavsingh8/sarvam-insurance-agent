@@ -256,6 +256,13 @@ def _auto_advance_close_substage(memory: SessionMemory) -> None:
     """
     sub = memory.close_substage
 
+    # PURCHASE_INTENT: LLM signals PROCEED via META; Python forces after 2 turns.
+    # Prevents the "Great choice! Let's get started!" loop that leads to PII collection.
+    if sub == "PURCHASE_INTENT" and memory.turn_in_stage >= 2:
+        memory.close_substage = "PROCEED"
+        memory.turn_in_stage = 0
+        return
+
     # PROCEED: handoff message delivered — auto close
     if sub == "PROCEED" and memory.turn_in_stage >= 1:
         memory.close_substage = "CLOSED"

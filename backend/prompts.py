@@ -393,7 +393,11 @@ STAGE_INTENTS: dict[str, str] = {
         "  - If no premium figures are in CALCULATED NUMBERS, say: 'The exact premium for your profile\n"
         "    needs a quote from HDFC Life directly — I don't have rate tables for your specific age.'\n"
         "  - The ₹22/day (₹7,901/year) benchmark is for a 25-year-old. Do NOT apply it to this customer.\n\n"
-        "Set stage=CLOSE in META when the customer has made a variant choice or expressed clear interest."
+        "CLOSING:\n"
+        "  - When customer explicitly agrees ('yes', 'yes let's go', 'that's perfect', 'proceed', 'theek hai'):\n"
+        "    Set stage=CLOSE close_substage=PROCEED in META. Skip PURCHASE_INTENT — you already asked\n"
+        "    the assumptive close and they said yes. Go straight to PROCEED.\n"
+        "  - When customer shows interest but hasn't committed: set stage=CLOSE close_substage=PURCHASE_INTENT."
     ),
 
     "EXPLAIN": (
