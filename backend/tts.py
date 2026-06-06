@@ -153,9 +153,9 @@ def normalize_for_tts(text: str) -> str:
     # ── 5. Acronyms / abbreviations ──────────────────────────────────────
     # Handle plural forms first (EMIs, ULIPs) before the singular loop.
     _ACRONYM_PLURALS = {
-        "EMIs":   "E M I s",
-        "ULIPs":  "U L I P s",
-        "SIPs":   "S I P s",
+        "EMIs":   "E M I S",
+        "ULIPs":  "U L I P S",
+        "SIPs":   "S I P S",
     }
     for abbr, spoken in _ACRONYM_PLURALS.items():
         text = re.sub(rf"\b{re.escape(abbr)}\b", spoken, text)

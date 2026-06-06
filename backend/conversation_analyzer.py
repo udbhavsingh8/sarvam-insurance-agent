@@ -139,8 +139,11 @@ def apply_analysis(
         current = memory.stage
         requested = analysis.stage
 
-        # Interrupt stages (QUESTION_ANSWER, OBJECTIONS) are always allowed
-        if requested in _INTERRUPT_STAGES:
+        # Interrupt stages (QUESTION_ANSWER, OBJECTIONS) are allowed except from CLOSE/CLOSED.
+        # Once conversation is fully closed, no more interrupts — the session is over.
+        if requested in _INTERRUPT_STAGES and not (
+            current == "CLOSE" and memory.close_substage == "CLOSED"
+        ):
             memory.previous_stage = current
             memory.return_to_stage = current
             memory.stage = requested

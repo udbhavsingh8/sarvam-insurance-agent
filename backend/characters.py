@@ -17,7 +17,7 @@ CHARACTERS: dict[str, dict] = {
         "gender": "male",
 
         "persona": (
-            "a high-performing insurance advisor in his early 30s with eight years of field experience. "
+            "a high-performing insurance advisor in his early 30s with twenty years of field experience. "
             "He is energetic, confident, and genuinely consultative — he listens carefully, then connects the product "
             "directly to the customer's situation. He moves conversations forward with purpose. "
             "He is warm and engaging without being pushy. His goal is always to help the customer make the right decision — "

@@ -144,7 +144,7 @@ def _extract_age(t: str) -> Optional[int]:
         start = max(0, m.start() - 25)
         ctx = t[start : m.end() + 25]
         if 18 <= val <= 75 and not re.search(
-            r'\b(?:for|next|past|last|loan|emi|term|policy|support|more|ago)\b', ctx
+            r'\b(?:for|next|past|last|loan|emi|term|policy|support|more|ago|around|about|maybe|close|approximately|roughly)\b', ctx
         ):
             return val
 
@@ -379,6 +379,8 @@ def _extract_years_of_support(t: str) -> Optional[int]:
         r"\bnext\s+(\d{1,2})\s*years?\b",
         r"(\d{1,2})\s*(?:more\s+)?years?\s+(?:of\s+)?(?:support|protection|cover)",
         r"(\d{1,2})\s*years?\s+support",
+        # "around/about/maybe/close to N years" — used conversationally
+        r"(?:around|about|maybe|roughly|close\s+to|approximately)\s+(\d{1,2})\s*years?",
     ]
     for p in specific_patterns:
         m = re.search(p, t_norm)
@@ -420,7 +422,24 @@ def _extract_existing_cover(t: str) -> Optional[float]:
     Patterns: "₹50 lakh employer cover", "company gives 3x salary",
               "I already have a 1 crore policy", "50 lakh term plan already",
               "employer cover of 25 lakh"
+    Returns 0.0 when customer explicitly says they have no insurance.
     """
+    t_lower = t.lower()
+
+    # Explicit "no insurance" → return 0.0 so the gate knows this was answered
+    _NO_COVER_PATTERNS = [
+        r"\bno\b.*\b(life\s+)?insurance\b",
+        r"\bdon'?t\s+have\b.*\b(life\s+)?insurance\b",
+        r"\bnahi\b.*\binsurance\b",
+        r"\bkoi\b.*\binsurance\b.*\bnahi\b",
+        r"\bno\b.*\bcover(age)?\b",
+        r"\bnot\s+(insured|covered)\b",
+        r"\bno\s+existing\b",
+        r"\bnone\b.*\b(life\s+)?insurance\b",
+    ]
+    if any(re.search(p, t_lower) for p in _NO_COVER_PATTERNS):
+        return 0.0
+
     # Devanagari normalisation
     t_norm = re.sub(r"लाख(?:ों)?", "lakh", t)
     t_norm = re.sub(r"करोड़|करोड", "crore", t_norm)
@@ -432,6 +451,9 @@ def _extract_existing_cover(t: str) -> Optional[float]:
         "corporate cover", "current policy", "other policy", "another policy",
         "term plan already", "already insured", "already covered",
         "company ke through", "company se", "employer se",
+        "from my employer", "through employer", "from employer",
+        "company gives", "employer gives", "office gives",
+        "through my company", "from my company",
     ]
     has_existing = any(m in t_norm for m in existing_markers)
     if not has_existing:

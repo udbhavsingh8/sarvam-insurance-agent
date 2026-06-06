@@ -176,7 +176,7 @@ def _auto_advance_stage(memory: SessionMemory, plan_type: str = "other") -> None
     # ── DISCOVERY: advance only when discovery_sufficient() is True ──────
     # Python-only gate — LLM cannot signal out of DISCOVERY.
     if stage == "DISCOVERY":
-        if memory.customer_profile.discovery_sufficient(plan_type):
+        if memory.customer_profile.discovery_sufficient(plan_type) or memory.turn_in_stage >= 8:
             memory.previous_stage = stage
             if plan_type == "term":
                 memory.stage = "GAP_CALC"
@@ -263,8 +263,10 @@ def _auto_advance_close_substage(memory: SessionMemory) -> None:
         memory.turn_in_stage = 0
         return
 
-    # PROCEED: handoff message delivered — auto close
-    if sub == "PROCEED" and memory.turn_in_stage >= 1:
+    # PROCEED: handoff message delivered — auto close.
+    # Threshold is >= 2 because the VARIANTS→CLOSE transition increments turn_in_stage
+    # to 1 in the same Python call before the PROCEED LLM has had any turn.
+    if sub == "PROCEED" and memory.turn_in_stage >= 2:
         memory.close_substage = "CLOSED"
         memory.turn_in_stage = 0
         return

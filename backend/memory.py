@@ -74,15 +74,18 @@ class CustomerProfile:
         """
         True when DISCOVERY has collected enough to move to the next stage.
 
-        Gate: age + income_range only. Family context (dependents/marital) is
-        collected conversationally but NOT a gate — regex extractors are too
-        brittle for the infinite ways people describe family ("my son", "mera
-        beta", "we are a family of four"). Gating on it causes stage lockup.
-
-        Smoker, liabilities, existing cover, years_of_support are optional
-        enrichment — the gap engine has sensible defaults for all of them.
+        Hard gates: age + income_range + existing_cover_lakh + years_of_support.
+        - existing_cover_lakh: 0.0 means "no insurance" (explicitly answered), None means not asked yet.
+        - years_of_support: extracted from "20 years", "till retirement", etc.
+        Family context (dependents/marital) is NOT gated — too brittle to extract reliably.
+        A 8-turn fallback in _auto_advance_stage advances regardless if extraction keeps failing.
         """
-        return self.age is not None and self.income_range is not None
+        return (
+            self.age is not None
+            and self.income_range is not None
+            and self.existing_cover_lakh is not None
+            and self.years_of_support is not None
+        )
 
     def gap_calc_inputs_ready(self) -> bool:
         """True if we have enough for the gap calculation (age + income at minimum)."""

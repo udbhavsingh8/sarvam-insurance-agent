@@ -395,8 +395,9 @@ STAGE_INTENTS: dict[str, str] = {
         "  - The ₹22/day (₹7,901/year) benchmark is for a 25-year-old. Do NOT apply it to this customer.\n\n"
         "CLOSING:\n"
         "  - When customer explicitly agrees ('yes', 'yes let's go', 'that's perfect', 'proceed', 'theek hai'):\n"
-        "    Set stage=CLOSE close_substage=PROCEED in META. Skip PURCHASE_INTENT — you already asked\n"
-        "    the assumptive close and they said yes. Go straight to PROCEED.\n"
+        "    Say ONLY one brief acknowledgment: 'Perfect, let's get that set up for you.' — nothing else.\n"
+        "    Do NOT say 'Thank you for choosing', do NOT summarize the plan, do NOT say goodbye.\n"
+        "    The handoff script comes in the next stage. Set stage=CLOSE close_substage=PROCEED in META.\n"
         "  - When customer shows interest but hasn't committed: set stage=CLOSE close_substage=PURCHASE_INTENT."
     ),
 
@@ -554,6 +555,8 @@ _OLD_CLOSE_SUBSTAGE_INTENTS_SUMMARY = {
         "Now introduce the specific product — not generically, but as a direct recommendation for THIS customer.\n\n"
         "Structure:\n"
         "  1. Name their situation: 'Based on what you've told me — [age], [family], [gap]...'\n"
+        "     CRITICAL: [age] = customer's age from CUSTOMER PROFILE. Do NOT confuse years_of_support with age.\n"
+        "     If age is 31 and years_of_support is 20, say 'at 31' — never 'at 20'.\n"
         "  2. Rule out alternatives: 'I am not recommending a ULIP, endowment, or money-back plan for this.'\n"
         "     (Only say this if the plan is a term plan. Skip for savings plans.)\n"
         "  3. Name the recommendation: 'I'm recommending [Plan Name] from [Company].'\n"
@@ -666,9 +669,15 @@ CLOSE_SUBSTAGE_INTENTS: dict[str, str] = {
         "Set close_substage=CLOSED in META after their response."
     ),
     "CLOSED": (
-        "Deliver a warm, brief closing: 'Thank you for your time. "
-        "If you have questions later, our support team is always there. Have a great day.'\n"
-        "Nothing else. The conversation is complete."
+        "The conversation is complete. Say EXACTLY this:\n"
+        "'Thank you for your time. If you have any questions later, our support team is always there. Have a great day.'\n\n"
+        "CRITICAL — no matter what the customer asks or says, do NOT:\n"
+        "  - Answer any product questions\n"
+        "  - Discuss variants, premiums, or riders\n"
+        "  - Explain any features or benefits\n"
+        "  - Ask any questions\n"
+        "  - Say anything beyond the closing line above\n"
+        "The session is over. Repeat the closing line if needed, then stop."
     ),
 }
 
@@ -747,6 +756,8 @@ CURRENT STAGE: {stage}
 {advisor_rules}
 
 {deflection_playbook}
+
+⚠️ LANGUAGE THIS TURN: The customer's last message was in {language_name}. Your reply MUST be in {language_name}. Ignore the language of prior conversation turns.
 
 {meta_tag_instruction}\
 """
