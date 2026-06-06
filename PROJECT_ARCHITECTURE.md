@@ -51,37 +51,46 @@ STEP 2: Session Start
 AgentSession created in memory → /chat called with "__opener__" →
 generate_opener() returns deterministic greeting → TTS spoken → chat window opens
 
-STEP 3: INTRODUCE Stage
+STEP 3: GREET Stage
 Agent: "Hi, I'm Arjun from PolicyAI. I've gone through the [plan name] policy document..."
 Customer: "Yes, tell me about it" or "I don't know this plan"
+Agent acknowledges and bridges to discovery (1 turn only — Python forces advance to DISCOVERY)
 
-STEP 4: PROFILE Stage (Python advances after 2 INTRODUCE turns)
-Agent collects in natural conversation: age → smoker status → income → family situation → existing coverage
+STEP 4: DISCOVERY Stage (Python advances when discovery_sufficient() == True or 8 turns)
+Agent collects in natural conversation: age → who depends on income → annual income →
+outstanding loans → existing life insurance → years of support needed
 Max 2 questions per turn. Only missing fields asked.
-Python advances to NEED_DEVELOPMENT when is_sufficient() == True.
+Income-gated: if income not known, ONLY asks about income until collected.
+Rupee guard: any ₹ amount in agent response during DISCOVERY is replaced with a safe redirect.
 
-STEP 5: NEED_DEVELOPMENT Stage
-Agent: "If something unexpected happened and you couldn't work for a year, how would your family manage financially?"
-Customer articulates vulnerability.
-Python advances to EXPLAIN after 2 turns.
+STEP 5: GAP_CALC Stage (term plans only, auto-advances after 1 turn)
+Agent walks through deterministic gap calculation from gap_engine.py:
+"Your income of ₹X lakh × Y years = ₹Z crore. Plus loans. Minus existing cover.
+Protection gap = ₹A crore."
+Numbers come exclusively from gap_engine.py — no LLM computation.
 
-STEP 6: EXPLAIN Stage
-Agent explains 4 plan topics (chosen by plan_type + customer profile):
-  Term plan example: coverage_and_sum_assured → premium_and_daily_cost → death_benefit_and_payout → key_exclusions
-Each explanation: connects to customer's risk narrative → plan benefit → calculated numbers → check-in question.
-Python advances to RECOMMENDATION when close_readiness ≥ 70 and ≥ 2 EXPLAIN turns.
+STEP 6: POSITION Stage (auto-advances after 1 turn)
+Agent reframes term insurance using car insurance analogy.
+If customer already knows term insurance → LLM sets position_skip=true → skips to RECOMMEND.
 
-STEP 7: RECOMMENDATION Stage
-Agent: "Given that [specific customer risk], this plan ensures [specific outcome].
-For your profile, this works out to [calculated premium]. I genuinely think this plan makes sense for you.
-Would you like to take this forward?"
-Python advances to CLOSE after 1 turn.
+STEP 7: RECOMMEND Stage (auto-advances after 1 turn)
+Agent names Click2Protect Life directly: "I'm recommending Click2Protect Life from HDFC."
+3-4 sentences only. No premium amounts unless in CALCULATED NUMBERS block.
 
-STEP 8: CLOSE Stage
-PURCHASE_INTENT → customer says yes → PROCEED → agent delivers handoff message
-                → customer says no → FEEDBACK → agent collects decline reason → CLOSED
+STEP 8: VARIANTS Stage (term plans) / EXPLAIN Stage (savings plans)
+VARIANTS: Agent recommends one variant (default: Life Option), asks about ADB rider,
+CI Rebalance if family history. Assumptive close: "Shall we go with [variant] for [gap amount]?"
+ROP mentioned only if customer explicitly asks about getting money back.
+EXPLAIN: Agent explains one topic at a time (savings/non-term plans only).
 
-STEP 9: Evaluation (optional)
+STEP 9: CLOSE Stage
+PURCHASE_INTENT → customer agrees → PROCEED → agent delivers:
+  "Thank you. I'll have the onboarding link sent to you on SMS and email..."
+PURCHASE_INTENT → customer declines → FEEDBACK → agent collects reason → CLOSED
+VARIANTS direct close: "Perfect, let's get that set up for you." → PROCEED directly (skips PURCHASE_INTENT)
+CLOSED: terminal state; QUESTION_ANSWER interrupts blocked
+
+STEP 10: Evaluation (optional)
 Manager clicks "Evaluate Session" → /evaluate called → LLM generates coaching report
 ```
 
@@ -120,12 +129,12 @@ Manager clicks "Evaluate Session" → /evaluate called → LLM generates coachin
    │                    │   (agent.py)         │
    │                    └────────┬────────────┘
    │                             │
-   ├────────────────┬────────────┼────────────────┬────────────┐
-   ▼                ▼            ▼                 ▼            ▼
+   ├────────────────┬────────────┼──────────────────┬────────────┐
+   ▼                ▼            ▼                  ▼            ▼
 ┌──────────┐ ┌──────────┐ ┌──────────────┐ ┌──────────┐ ┌──────────┐
-│DocumentS │ │SessionMe │ │  LLMClient   │ │cover_eng │ │quote_eng │
-│tore (rag)│ │mory      │ │ (llm.py)     │ │ine.py    │ │ine.py    │
-│BM25Store │ │(memory.py│ │ gpt-4o-mini  │ │          │ │          │
+│DocumentS │ │SessionMe │ │  LLMClient   │ │gap_engin │ │cover/    │
+│tore (rag)│ │mory      │ │ (llm.py)     │ │e.py      │ │quote_eng │
+│BM25Store │ │(memory.py│ │ gpt-4o-mini  │ │          │ │ines.py   │
 └──────────┘ └──────────┘ └──────────────┘ └──────────┘ └──────────┘
 
 EXTERNAL SERVICES:
@@ -152,6 +161,7 @@ EXTERNAL SERVICES:
 - `record_turn(...)` — called after streaming to update memory
 - `_build_messages(user_text)` — assembles the full LLM message list (system prompt + history + current turn)
 - `_auto_advance_stage(memory, plan_type)` — Python-gated stage transitions
+- `_guard_discovery_numbers(text, profile)` — hard safety net: replaces any ₹ amount in DISCOVERY response
 - `build_risk_narrative(profile)` — deterministic vulnerability story
 - `detect_language_from_text(text)` — Unicode script range detection
 
@@ -163,29 +173,44 @@ EXTERNAL SERVICES:
 - Phase 4: Sends `{type:"done", language, stage, profile}`
 
 ### backend/memory.py — Session State
-- `CustomerProfile` dataclass — 13 fields
-- `CustomerIntelligence` dataclass — interest_level, close_readiness, objections, lead_score()
-- `SessionMemory` dataclass — all session state
+- `CustomerProfile` dataclass — 15 fields (including new `existing_cover_lakh`, `years_of_support`, `chosen_variant`)
+- `CustomerIntelligence` dataclass — interest_level, close_readiness, gap_lakh, objections, lead_score()
+- `SessionMemory` dataclass — all session state; initial `stage="GREET"`, initial `close_substage="PURCHASE_INTENT"`
 - `choose_explain_topics(plan_type, profile)` — dynamic topic selection
+- `discovery_sufficient(plan_type)` — gates: age + income_range + existing_cover_lakh + years_of_support
+
+### backend/gap_engine.py — Deterministic Gap Calculator (NEW)
+- `build_gap_calculation(profile)` → dict with gap_lakh, spoken_walkthrough, assumptions_made
+- `gap_to_prompt_block(gap)` → injects pre-formatted walkthrough into system prompt at GAP_CALC
+- `_parse_income_lpa(income_range)` — parses "25 LPA", "₹2,00,000/month", etc.
+- `_fmt_lakh(lakh)` → "₹X crore" or "₹X lakh"
+- Formula: gap_lakh = (income_lpa × years_of_support) + liabilities_lakh − existing_cover_lakh
+- Defaults: 20 years, 0 existing cover, 0 liabilities if not stated
+- Called at GAP_CALC stage in `_build_messages()`; result stored in `memory.intelligence.gap_lakh`
 
 ### backend/prompts.py — All Prompt Templates
 - `VOICE_RULES`, `ADVISOR_RULES`, `DEFLECTION_PLAYBOOK` — formatting and behaviour constants
 - `OPENER_PROMPT` — not used (generate_opener() is now deterministic)
-- `STAGE_INTENTS: dict[str, str]` — 8 stage intent guides
-- `CLOSE_SUBSTAGE_INTENTS: dict[str, str]` — 5 close substage intents
-- `META_TAG_INSTRUCTION` — instructs LLM to emit [META ...] tag
+- `STAGE_INTENTS: dict[str, str]` — intents for new consultative stages (GREET, DISCOVERY, GAP_CALC, POSITION, RECOMMEND, VARIANTS, EXPLAIN, OBJECTIONS, QUESTION_ANSWER) plus legacy stubs
+- `CLOSE_SUBSTAGE_INTENTS: dict[str, str]` — PURCHASE_INTENT, PROCEED, FEEDBACK, CLOSED (SUMMARY removed from active flow)
+- `META_TAG_INSTRUCTION` — instructs LLM to emit [META ...] tag with `position_skip` field added
 - `MAIN_SYSTEM_PROMPT` — master template (~30 placeholders, assembled every turn)
 - `EVALUATION_PROMPT` — post-conversation coaching report
 
 ### backend/conversation_analyzer.py — Meta Tag Parser + Analysis
 - `parse_meta_tag(text)` → `(clean_text, TurnAnalysis | None)` — strips [META ...] tag, returns analysis
 - `apply_analysis(memory, analysis, user_text)` — applies stage transitions, interest/objection updates
-- Contains all stage transition gates (I-9, PROFILE→PERSONALIZE gate, NEED_DEV→EXPLAIN blocking)
+- `TurnAnalysis` dataclass includes new `position_skip: bool` field
+- `_LLM_ALLOWED_TRANSITIONS` enforces which stages the LLM may request transitions to
+- DISCOVERY → next: Python-only gate; LLM cannot advance out of DISCOVERY
+- VARIANTS → CLOSE: Python sets `close_substage="PROCEED"` directly (skips PURCHASE_INTENT)
+- CLOSED: blocks QUESTION_ANSWER interrupts
 
 ### backend/profile_extractor.py — Deterministic Profile Extraction
 - `extract_profile_fields(text) → dict` — runs before every LLM call
-- 10 extractors: age, smoker, income, dependents, marital_status, gender, policy_term, payment_frequency, liabilities_lakh, cover_amount_override_lakh
-- All regex-based, no LLM
+- 12 extractors: age, smoker, income, dependents, marital_status, gender, policy_term, payment_frequency, liabilities_lakh, cover_amount_override_lakh, **years_of_support**, **existing_cover_lakh**
+- `existing_cover_lakh = 0.0` when customer says "no insurance" (gates discovery_sufficient)
+- "Maybe close to 20 years" → `years_of_support = 20`
 
 ### backend/recommendation.py — Benchmark Premium Estimates
 - `build_recommendation_block(profile, plan_meta, brief_text) → str`
@@ -210,10 +235,9 @@ EXTERNAL SERVICES:
 ### backend/ingestion.py — PDF Processing Pipeline
 - `ingest(pdf_path, index_dir) → (page_count, name)` — main entry point
 - Produces 5 output files: .txt, .meta.json, .brief.txt, .structure.json, .chunks.json
+- Skips brief/meta regeneration if files already exist (prevents revert-on-upload bug)
 - `_extract_metadata()` → GPT-4o-mini extracts plan_name, company_name, plan_type, one_line_pitch
 - `_generate_brief_via_llm()` → GPT-4o-mini generates 9-section advisor cheat-sheet
-- `_extract_section()` → keyword-based section extraction for brief fallback
-- `_profiling_questions_for_type()` → per-plan-type question sequences (reference only)
 
 ### backend/rag.py — Document Store + Retrieval
 - `DocumentStore(index_dir, name)` — loads text, metadata, brief, BM25 store, structure
@@ -244,6 +268,7 @@ EXTERNAL SERVICES:
 
 ### backend/characters.py — Character Registry
 - `CHARACTERS: dict[str, dict]` — arjun and lalita
+- Arjun: persona updated to "twenty years of field experience" (was "eight years")
 - Each character: id, name, gender, persona, style_guide, emotional_guide, opener (unused), voice
 - `SUPPORTED_LANGUAGES: dict[str, str]` — 10 BCP-47 codes
 
@@ -251,6 +276,7 @@ EXTERNAL SERVICES:
 - `synthesize(text, language_code, speaker) → bytes` — non-streaming, returns full WAV
 - `synthesize_stream(text, language_code, speaker) → Iterator[bytes]` — streaming
 - `normalize_for_tts(text) → str` — converts ₹ amounts, LPA, percentages, product names, age patterns
+  - "EMI" → "E M I S" (all caps, spaced) for plural; "100%" → "one hundred percent"
 - `_truncate_for_tts(text)` — hard cap 400 chars (bulbul:v3 limit)
 - `SUPPORTED_LANGUAGES` — 10 language codes
 
@@ -259,8 +285,9 @@ EXTERNAL SERVICES:
 - Always passes `language_code="unknown"` (specific codes break probability)
 
 ### backend/llm.py — LLM Client
-- `LLMClient.complete(messages) → str` — blocking, returns full response
-- `LLMClient.stream(messages) → Iterator[str]` — streaming tokens
+- `LLMClient.complete(messages, stage=None) → str` — blocking, returns full response
+- `LLMClient.stream(messages, stage=None) → Iterator[str]` — streaming tokens
+- Stage-scoped temperature: lower temperature at GREET/DISCOVERY, higher at VARIANTS/OBJECTIONS
 - Both use retry_call() with 3 attempts, exponential backoff
 
 ### backend/errors.py — Error Handling
@@ -427,16 +454,21 @@ AgentSession.chat_stream(transcript)
   ├── detect_language_from_text() (typed path, N/A for voice)
   ├── extract_profile_fields() → CustomerProfile.apply_updates()
   ├── _build_messages() → [system_prompt, ...history, user_turn]
-  └── LLMClient.stream() → OpenAI gpt-4o-mini streaming
+  │   ├── (DISCOVERY) missing_fields_line injected (income-gated priority)
+  │   ├── (GAP_CALC) build_gap_calculation() → gap_to_prompt_block() injected
+  │   ├── (RECOMMEND/VARIANTS/CLOSE) build_risk_narrative() injected
+  │   └── (VARIANTS/CLOSE/EXPLAIN) build_recommendation_block() injected
+  └── LLMClient.stream(stage=...) → OpenAI gpt-4o-mini streaming
      │
      ▼  LLM tokens stream
 Sentence splitter (regex on [.!?।])
   → Each complete sentence → {type:"sentence"} → browser (text display)
+  → (DISCOVERY) _guard_discovery_numbers() applied to each sentence
   → clean_sentences[] accumulated
      │
      ▼  After all LLM tokens received
 parse_meta_tag() → (clean_response, TurnAnalysis)
-apply_analysis() → update stage, interest, close_readiness, objections
+apply_analysis() → update stage, interest, close_readiness, objections, position_skip
 _auto_advance_stage() → Python-gated transitions
      │
      ▼  Parallel TTS
@@ -467,20 +499,23 @@ The agent is `AgentSession` — a single Python object per conversation session.
 ### How the Agent Knows What to Do (each turn)
 ```
 1. WHAT STAGE AM I IN?
-   → memory.stage (INTRODUCE|PROFILE|NEED_DEVELOPMENT|EXPLAIN|RECOMMENDATION|HANDLE|CLOSE|QUESTION_ANSWER)
+   → memory.stage (GREET|DISCOVERY|GAP_CALC|POSITION|RECOMMEND|VARIANTS|EXPLAIN|OBJECTIONS|CLOSE|QUESTION_ANSWER)
    → STAGE_INTENTS[stage] injected as "YOUR GOAL THIS TURN"
+   → At CLOSE: CLOSE_SUBSTAGE_INTENTS[close_substage] used instead
 
 2. WHAT DO I KNOW ABOUT THE PRODUCT?
    → store.sales_brief (LLM-generated cheat-sheet from ingestion)
    → store.get_context(user_text, top_k=3) (BM25 top-3 relevant chunks)
    → Both injected into system prompt
+   → PREMIUMS section stripped from brief at GREET/DISCOVERY stages
 
 3. WHAT DO I KNOW ABOUT THE CUSTOMER?
    → memory.customer_profile.summary() (collected fields)
-   → missing_fields_line (at PROFILE stage: what's still needed)
-   → build_risk_narrative(profile) (at sales-active stages: vulnerability story)
-   → build_recommendation_block(profile, meta, brief) (EXPLAIN+: cover estimate)
-   → quote_to_prompt_block(quote) (RECOMMENDATION/CLOSE: document-derived quote)
+   → missing_fields_line (at DISCOVERY stage: income-gated priority; what's still needed)
+   → build_risk_narrative(profile) (at RECOMMEND/VARIANTS/EXPLAIN/CLOSE/OBJECTIONS)
+   → build_gap_calculation(profile) → gap_to_prompt_block() (at GAP_CALC)
+   → build_recommendation_block(profile, meta, brief) (RECOMMEND/VARIANTS/EXPLAIN/CLOSE)
+   → quote_to_prompt_block(quote) (CLOSE: document-derived quote)
 
 4. HOW SHOULD I COMMUNICATE?
    → character.persona + character.style_guide + character.emotional_guide
@@ -488,9 +523,10 @@ The agent is `AgentSession` — a single Python object per conversation session.
 
 5. WHAT LANGUAGE?
    → language_display_name(memory.detected_language) injected as mandatory language rule
+   → Per-turn ⚠️ LANGUAGE THIS TURN reminder appended at end of system prompt
 
 6. HOW DO I SIGNAL TRANSITIONS?
-   → META_TAG_INSTRUCTION injected; LLM appends [META stage=... ...] to every response
+   → META_TAG_INSTRUCTION injected; LLM appends [META stage=... position_skip=... ...] to every response
    → conversation_analyzer.py parses and validates; agent.py gates transitions
 ```
 
@@ -504,12 +540,14 @@ No explicit tool-calling framework (no LangChain, no function_calling API). All 
 |---|---|---|
 | Profile extraction | profile_extractor.extract_profile_fields() | Every turn, before LLM |
 | Language detection | agent.detect_language_from_text() | Every turn (typed text) |
-| Risk narrative | agent.build_risk_narrative() | NEED_DEV/EXPLAIN/REC/CLOSE/HANDLE |
-| Cover recommendation | recommendation.build_recommendation_block() | EXPLAIN/RECOMMENDATION/CLOSE |
-| Premium quote | cover_engine.recommend_cover() + quote_engine.generate_quote() | RECOMMENDATION/CLOSE |
+| Gap calculation | gap_engine.build_gap_calculation() | GAP_CALC stage, before LLM |
+| Risk narrative | agent.build_risk_narrative() | RECOMMEND/VARIANTS/EXPLAIN/CLOSE/OBJECTIONS |
+| Cover recommendation | recommendation.build_recommendation_block() | RECOMMEND/VARIANTS/EXPLAIN/CLOSE |
+| Premium quote | cover_engine.recommend_cover() + quote_engine.generate_quote() | CLOSE |
 | Document retrieval | store.get_context() via BM25Store.retrieve() | Every turn |
 | Stage advancement | agent._auto_advance_stage() | Every turn, after LLM response |
 | Meta tag parsing | conversation_analyzer.parse_meta_tag() | Every turn, after LLM response |
+| Discovery number guard | agent._guard_discovery_numbers() | DISCOVERY stage, after LLM response |
 
 ---
 
@@ -519,26 +557,38 @@ No explicit tool-calling framework (no LangChain, no function_calling API). All 
 The system prompt assembled by `_build_messages()` includes:
 - Last 6 turns of conversation history (`MAX_HISTORY_TURNS = 6`)
 - Current customer profile summary
-- Missing fields (at PROFILE stage)
+- Missing fields (at DISCOVERY stage, income-gated)
+- Gap calculation block (at GAP_CALC stage)
 - Risk narrative (sales-active stages)
-- Recommendation block + quote (EXPLAIN/RECOMMENDATION/CLOSE)
-- Memory summary (interest level, lead score, open objections, positive signals)
+- Recommendation block + quote (RECOMMEND/VARIANTS/EXPLAIN/CLOSE)
+- Memory summary (interest level, lead score, open objections, positive signals, computed gap)
 
 ### Session Memory (Python object, in-process)
 `SessionMemory` dataclass contains:
 ```python
-stage: str                          # current conversation stage
-previous_stage: str                 # for HANDLE/QA return
-return_to_stage: str                # set when entering QUESTION_ANSWER
+stage: str                          # current conversation stage (initial: "GREET")
+previous_stage: str                 # for QA/OBJECTIONS return
+return_to_stage: str                # set when entering QUESTION_ANSWER / OBJECTIONS
 turn_in_stage: int                  # turns spent in current stage
-close_substage: str                 # PURCHASE_INTENT/PROCEED/FEEDBACK/CLOSED
+close_substage: str                 # PURCHASE_INTENT/PROCEED/FEEDBACK/CLOSED (initial: "PURCHASE_INTENT")
+position_skipped: bool              # True if POSITION stage was bypassed
 detected_language: str              # BCP-47 code
 emotional_state: str                # curious/engaged/hesitant/resistant/anxious/satisfied
-customer_profile: CustomerProfile   # 13 fields
+customer_profile: CustomerProfile   # 15 fields (includes years_of_support, existing_cover_lakh, chosen_variant)
 explain_subtopic_index: int         # current EXPLAIN topic
 explain_topics: list[str]           # dynamic topic list (set at EXPLAIN entry)
-intelligence: CustomerIntelligence  # interest, close_readiness, objections, lead_score
+intelligence: CustomerIntelligence  # interest, close_readiness, gap_lakh, objections, lead_score
 turn_log: list[dict]                # full conversation history
+```
+
+### CustomerProfile Key Fields (new vs old design)
+```python
+existing_cover_lakh: Optional[float]  # numeric existing life cover
+    # 0.0 = "no insurance" explicitly answered (gates discovery_sufficient)
+    # None = not asked yet (blocks discovery_sufficient)
+years_of_support: Optional[int]       # years of income replacement needed (gates discovery_sufficient)
+chosen_variant: Optional[str]         # plan variant selected at VARIANTS stage
+liabilities_lakh: Optional[float]     # outstanding loans in lakh (input to gap_engine)
 ```
 
 ### Persistent Storage
@@ -550,50 +600,59 @@ turn_log: list[dict]                # full conversation history
 
 ## 14. Workflow Architecture (Stage Machine)
 
+### Stage Flows
+```
+Term plans:    GREET → DISCOVERY → GAP_CALC → POSITION → RECOMMEND → VARIANTS → CLOSE
+Savings plans: GREET → DISCOVERY → RECOMMEND → EXPLAIN → CLOSE
+Any stage:     → QUESTION_ANSWER (interrupt, returns to previous stage after 1 turn)
+               → OBJECTIONS     (interrupt, returns to previous stage after 1 turn)
+               → NOT from CLOSE/CLOSED (QUESTION_ANSWER blocked from CLOSED substage)
+```
+
 ### Stage Transition Rules
 ```
-INTRODUCE (start)
-├── LLM signals PROFILE → allowed (with Python validation)
-└── turn_in_stage >= 2 → Python forces to PROFILE
+GREET (start)
+└── turn_in_stage >= 1 → Python forces to DISCOVERY (single-turn bridge only)
 
-PROFILE
-├── LLM signals PERSONALIZE → allowed ONLY IF age + (smoker or income) known
-├── LLM signals EXPLAIN/CLOSE/RECOMMENDATION → BLOCKED (Python gate I-9)
-└── is_sufficient(plan_type) == True → Python forces to NEED_DEVELOPMENT
+DISCOVERY
+├── discovery_sufficient(plan_type) == True → Python advances to GAP_CALC (term) or RECOMMEND (savings)
+├── turn_in_stage >= 8 → Python forces advance regardless (8-turn fallback escape)
+└── LLM CANNOT signal out of DISCOVERY — Python-only gate
 
-PERSONALIZE
-└── Python forces to NEED_DEVELOPMENT after 1 turn (vestigial stage)
+GAP_CALC
+└── turn_in_stage >= 1 → Python forces to POSITION (after 1 turn walkthrough)
 
-NEED_DEVELOPMENT
-├── LLM signals EXPLAIN → allowed
-├── LLM signals QUESTION_ANSWER/HANDLE → allowed
-├── LLM signals anything else → BLOCKED
-└── turn_in_stage >= 2 → Python forces to EXPLAIN
+POSITION
+├── LLM signals position_skip=true + stage=RECOMMEND → Python allows (sets position_skipped=True)
+└── turn_in_stage >= 1 → Python forces to RECOMMEND
 
-EXPLAIN
-├── LLM signals RECOMMENDATION → allowed
-├── LLM signals CLOSE → intercepted, redirected to RECOMMENDATION
-├── LLM signals QUESTION_ANSWER/HANDLE → allowed
-└── (on_last_topic AND turn_in_stage >= 1) OR (close_readiness >= 50 AND turn_in_stage >= 2) OR (turn_in_stage >= 6) → Python forces to RECOMMENDATION
+RECOMMEND
+└── turn_in_stage >= 1 → Python forces to VARIANTS (term) or EXPLAIN (savings)
 
-RECOMMENDATION
-└── turn_in_stage >= 1 → Python forces to CLOSE (substage=PURCHASE_INTENT)
+VARIANTS
+├── LLM signals stage=CLOSE → Python allows; sets close_substage=PROCEED (skips PURCHASE_INTENT)
+├── LLM signals QUESTION_ANSWER/OBJECTIONS → allowed (return after 1 turn)
+└── turn_in_stage >= 6 → Python forces to CLOSE (PURCHASE_INTENT) — hard escape
 
-HANDLE / QUESTION_ANSWER
-└── turn_in_stage >= 1 → Python returns to previous stage (or return_to_stage)
+EXPLAIN (savings plans)
+├── LLM signals stage=CLOSE → allowed (after final topic)
+└── (on_last_topic AND turn_in_stage >= 1) OR (turn_in_stage >= 6) → Python forces to CLOSE
+
+QUESTION_ANSWER / OBJECTIONS
+└── turn_in_stage >= 1 → Python returns to return_to_stage or previous_stage
 
 CLOSE (substage machine)
-├── PURCHASE_INTENT: LLM signals PROCEED → if customer yes
-│                   LLM signals FEEDBACK → if customer no
-├── PROCEED: Python forces to CLOSED after 1 turn
-├── FEEDBACK: LLM signals CLOSED; Python forces after 3 turns
-└── CLOSED: terminal
+├── PURCHASE_INTENT: LLM signals PROCEED (customer yes) or FEEDBACK (customer no)
+│                   Python forces to PROCEED after 2 turns
+├── PROCEED: Python forces to CLOSED after 2 turns (threshold >= 2 prevents same-turn skip)
+├── FEEDBACK: LLM signals CLOSED; Python forces after 2 turns
+└── CLOSED: terminal; QUESTION_ANSWER interrupts BLOCKED from here
 ```
 
 ### Dual Control (LLM + Python)
 - LLM signals desired transition via `[META stage=X]` tag
 - Python validates and may block, override, or redirect
-- Python also fires escape hatches when LLM gets stuck
+- Python also fires escape hatches when LLM gets stuck (8-turn DISCOVERY fallback, 6-turn VARIANTS escape, etc.)
 
 ---
 
@@ -708,10 +767,12 @@ profile_extractor(user_text) → CustomerProfile update
 language_detector(user_text) → language update
 store.get_context(user_text) → top-3 BM25 chunks
 build_risk_narrative(profile) → vulnerability story
+(GAP_CALC) build_gap_calculation(profile) → gap_to_prompt_block() → gap block
 build_recommendation_block(profile, meta, brief) → cover estimate
 generate_quote(profile, cover_lakh, structure) → premium quote
+_guard_discovery_numbers(clean, profile) → safety filter at DISCOVERY
 MAIN_SYSTEM_PROMPT.format(...all above...) → system message
-→ LLMClient → OpenAI gpt-4o-mini → raw response
+→ LLMClient(stage=...) → OpenAI gpt-4o-mini → raw response
 parse_meta_tag(raw) → clean text + TurnAnalysis
 apply_analysis(memory, analysis) → stage/intelligence update
 _auto_advance_stage(memory) → stage gate enforcement
@@ -739,31 +800,32 @@ sarvam-insurance-agent/
 ├── backend/
 │   ├── __init__.py               # Empty
 │   ├── main.py                   # FastAPI app, all endpoints
-│   ├── agent.py                  # AgentSession, stage machine, risk narrative
+│   ├── agent.py                  # AgentSession, stage machine, risk narrative, rupee guard
 │   ├── pipeline.py               # WebSocket streaming pipeline, WAV merge
-│   ├── memory.py                 # SessionMemory, CustomerProfile, CustomerIntelligence
-│   ├── prompts.py                # All prompt templates and constants
-│   ├── conversation_analyzer.py  # META tag parser, stage transition gates
-│   ├── profile_extractor.py      # Deterministic profile extraction (10 fields, regex)
+│   ├── memory.py                 # SessionMemory, CustomerProfile (15 fields), CustomerIntelligence
+│   ├── prompts.py                # All prompt templates and constants (new consultative stages)
+│   ├── conversation_analyzer.py  # META tag parser, stage transition gates (new stage set)
+│   ├── profile_extractor.py      # Deterministic profile extraction (12 fields, regex)
+│   ├── gap_engine.py             # NEW: deterministic gap calculation engine
 │   ├── recommendation.py         # Benchmark premium estimates
 │   ├── cover_engine.py           # Cover amount calculator
 │   ├── quote_engine.py           # Document-derived premium quotes
 │   ├── characters.py             # Character registry (Arjun, Lalita)
-│   ├── ingestion.py              # PDF processing pipeline (5 output files)
+│   ├── ingestion.py              # PDF processing pipeline (5 output files, skip-if-exists)
 │   ├── rag.py                    # DocumentStore, BM25 + keyword retrieval
 │   ├── bm25_store.py             # BM25Okapi index, section-aware chunking
 │   ├── table_parser.py           # Deterministic premium table extraction
 │   ├── structure_builder.py      # Product structure JSON builder
 │   ├── tts.py                    # Sarvam bulbul:v3 TTS, normalize_for_tts
 │   ├── stt.py                    # Sarvam saaras:v3 STT
-│   ├── llm.py                    # OpenAI gpt-4o-mini LLM client
+│   ├── llm.py                    # OpenAI gpt-4o-mini LLM client (stage-scoped temperature)
 │   ├── errors.py                 # Typed exceptions, retry_call
 │   ├── metrics.py                # JSONL logging
 │   ├── evaluation.py             # Post-conversation evaluation
-│   └── ingest_worker.py          # Thin CLI wrapper around ingestion.py
+│   └── ingest_worker.py          # Thin CLI wrapper around ingestion.py (orphaned)
 │
 ├── frontend/
-│   └── index.html                # Single-file SPA (1344 lines, CSS+HTML+JS)
+│   └── index.html                # Single-file SPA (CSS+HTML+JS)
 │
 ├── data/                         # Document artifacts (pre-ingested)
 │   ├── HDFC-Life-Click-2-Protect-Life-101N139V02-Brochure.pdf
@@ -813,7 +875,7 @@ sarvam-insurance-agent/
 
 ## 24. End-to-End Execution Walkthrough
 
-**Scenario**: Customer, 32 years old, non-smoker, married, 2 kids, 15 LPA income, no existing coverage. HDFC Click2Protect Life already uploaded.
+**Scenario**: Customer, 32 years old, non-smoker, married with father dependent, 15 LPA income, home loan of 30 lakh, no existing insurance, wants 20 years of support. HDFC Click2Protect Life already uploaded.
 
 ### Turn 0: Session Start
 ```
@@ -822,110 +884,123 @@ Server → AgentSession.generate_opener()
   → plan_name = "Click 2 Protect Life" (from meta.json, cleaned)
   → return "Hi, I'm Arjun from PolicyAI. I've gone through the Click 2 Protect Life policy document..."
 Client → playTTS(opener_text) → GET /speak?text=...
-Server → normalize_for_tts("Click 2 Protect Life") → no change
-  → synthesize_stream("Click 2 Protect Life...", "en-IN", "dev") → Sarvam bulbul:v3 → WAV stream
+Server → normalize_for_tts("Click 2 Protect Life...") → no change
+  → synthesize_stream(...) → Sarvam bulbul:v3 → WAV stream
 Client plays audio
 ```
 
-### Turn 1: Customer speaks "Yes, I'd like to know more" (Stage: INTRODUCE)
+### Turn 1: Customer speaks "Yes, I'd like to know more" (Stage: GREET)
 ```
 Client → POST /transcribe {audio=webm_blob}
 Sarvam saaras:v3 → {transcript:"Yes, I'd like to know more", language_code:"en-IN", language_probability:0.95}
 Session.update_language("en-IN", 0.95) → language committed (≥0.70)
 
-Client → WebSocket /ws/chat {session_id, message:"Yes, I'd like to know more", stt_latency_ms:340}
-
 AgentSession.chat_stream("Yes, I'd like to know more")
   extract_profile_fields → {} (no profile fields in text)
   _build_messages():
-    stage = INTRODUCE, turn_in_stage = 0
+    stage = GREET, turn_in_stage = 0
     brief = sales_brief (with PREMIUMS section stripped)
-    doc_context = BM25 top-3 chunks for "Yes I'd like to know more" → general overview chunks
-    risk_narrative = "" (not at sales-active stage)
-    recommendation_block = "" (not at EXPLAIN+)
-    stage_intent = STAGE_INTENTS["INTRODUCE"]
-    system_prompt assembled (~300 lines)
-    history = [] (first user turn)
-  
-  LLMClient.stream(messages) → OpenAI gpt-4o-mini
-  → tokens stream: "Click 2 Protect Life is a pure term insurance plan...Can I ask you a couple of quick questions to make this more relevant for you?[META stage=PROFILE interest_delta=+5 objection=none emotional_state=curious close_readiness_delta=0]"
+    stage_intent = STAGE_INTENTS["GREET"]
 
-pipeline.py sentence splitter:
-  sentence 1: "Click 2 Protect Life is a pure term insurance plan that pays your nominee a lump sum if something were to happen to you during the policy term."
-  → {type:"sentence", text:"..."} → client
-  sentence 2: "Can I ask you a couple of quick questions to make this more relevant for you?"
-  → {type:"sentence", text:"..."} → client
+  LLM → "Before I walk you through the plan, let me ask you a few quick questions..."
+  [META stage=DISCOVERY interest_delta=+5 objection=none emotional_state=curious close_readiness_delta=0]
 
 record_turn():
-  parse_meta_tag() → clean: (sentences above), analysis: {stage:PROFILE, interest_delta:5, ...}
-  apply_analysis(): stage INTRODUCE → PROFILE allowed → memory.stage = "PROFILE", turn_in_stage = 0
-  _auto_advance_stage(): stage=PROFILE, is_sufficient()==False → no auto-advance
-
-Parallel TTS:
-  asyncio.gather(synthesize(sentence1), synthesize(sentence2))
-  → both WAV blobs
-_merge_wav([wav1, wav2]) → single WAV
-→ binary frames to client
-→ {type:"audio_end"} → client assembles, plays
-→ {type:"done", language:"en-IN", stage:"PROFILE", profile:{fields:[]}} → client updates badges
+  parse_meta_tag() → stage=DISCOVERY
+  apply_analysis(): GREET → DISCOVERY allowed → memory.stage = "DISCOVERY", turn_in_stage = 0
+  _auto_advance_stage(): stage=GREET, turn_in_stage=1 → Python forces to DISCOVERY
+  (Python and LLM agree — DISCOVERY)
 ```
 
-### Turn 2: Customer "I'm 32, married with 2 kids" (Stage: PROFILE)
+### Turn 2: Customer "I'm 32, father is dependent on me" (Stage: DISCOVERY)
 ```
-extract_profile_fields("I'm 32, married with 2 kids")
-  → {age:32, marital_status:"married", dependents:2}
-  CustomerProfile.apply_updates() → age=32, marital_status="married", dependents=2, fields_collected=["age","marital_status","dependents"]
+extract_profile_fields("I'm 32, father is dependent on me")
+  → {age:32, dependents:1}
+  CustomerProfile.apply_updates() → age=32, dependents=1
 
 _build_messages():
-  stage = PROFILE, is_sufficient(plan_type="other") → False (no smoker, no income)
-  missing_fields_line = "STILL NEEDED FROM CUSTOMER: smoker status (yes/no), annual income.\nAsk ONLY about these fields..."
-  stage_intent = STAGE_INTENTS["PROFILE"] (ask max 2 missing fields, natural order)
+  stage = DISCOVERY
+  missing_fields_line = "⚠ CRITICAL: Annual income is NOT yet known. ASK FOR INCOME NOW..."
+  (age is known; income is the next gating field → agent only asks about income)
 
-LLM → "Do you smoke or use tobacco? And roughly what's your annual income?"
-[META stage=PROFILE interest_delta=+3 objection=none emotional_state=curious close_readiness_delta=0]
+LLM → "With your father depending on you, that's real responsibility. And what's your annual income roughly?"
+[META stage=DISCOVERY interest_delta=+3 ...]
 
-_auto_advance_stage(): is_sufficient() still False → no advance
+_guard_discovery_numbers() → no ₹ in text, passes through
+_auto_advance_stage(): discovery_sufficient() = False (no income_range) → no advance
 ```
 
-### Turn 3: Customer "I don't smoke, and I earn about 15 LPA" (Stage: PROFILE)
+### Turn 3: Customer "I earn about 15 LPA, and I have a home loan of 30 lakh" (Stage: DISCOVERY)
 ```
-extract_profile_fields() → {smoker:False, income_range:"15 LPA"}
-CustomerProfile.apply_updates() → smoker=False, income_range="15 LPA"
-fields_collected = ["age","marital_status","dependents","smoker","income_range"]
+extract_profile_fields() → {income_range:"15 LPA", liabilities_lakh:30.0}
+CustomerProfile.apply_updates()
 
-is_sufficient("other") → age(32)✓ + income_range("15 LPA")✓ → True
+_build_messages():
+  missing_fields_line = "STILL TO COLLECT IN DISCOVERY: existing life insurance (if any), how many years the family would need support."
 
-_auto_advance_stage() → stage="NEED_DEVELOPMENT", turn_in_stage=0
-
-LLM → "No existing cover at 32 — that's quite common. Quick question: if something unexpected happened and you couldn't work for a year, how would your wife and kids manage financially?"
-```
-
-### Turn 5: (after NEED_DEVELOPMENT) Stage: EXPLAIN
-```
-build_risk_narrative(profile):
-  "At 32, this is still a strong window to secure adequate cover. A spouse and 2 dependents rely on this income entirely..."
-
-build_recommendation_block(profile, meta, brief):
-  income_lpa = 15; has_dependents = True; multiplier = 15
-  cover_lakh = round(15 * 15 / 25) * 25 = 225 lakh = ₹2.25 crore
-  age_factor = 1.035^7 = 1.272; smoker_factor = 1.0
-  annual_premium = 8500 * 1.272 * (225/100) = ₹24,341
-  → "Suggested cover: ₹2.25 crore (15 LPA × 15x + dependents)\nPremium estimate: approx. ₹24,341/year"
-
-explain_topics = ["coverage_and_sum_assured", "premium_and_daily_cost", "death_benefit_and_payout", "key_exclusions"]
-explain_subtopic_line = "EXPLAIN TOPIC NOW: Coverage And Sum Assured (topic 1 of 4 | Next: premium and daily cost, death benefit and payout, key exclusions)"
-
-LLM → "Since you have no coverage right now and your family depends entirely on your income, having a ₹2.25 crore cover is the difference between your family staying secure or facing a financial crisis. Click 2 Protect Life lets you choose this coverage amount. Does that scale of protection make sense for your situation?"
+LLM → "Home loan adds to your exposure. Do you already have any life insurance — personal or through your employer?"
+_auto_advance_stage(): discovery_sufficient() = False (no existing_cover_lakh, years_of_support) → no advance
 ```
 
-### Turn N: CLOSE/PURCHASE_INTENT
+### Turn 4-5: Customer provides remaining fields → discovery_sufficient() fires
 ```
-Agent: "Would you like to proceed with purchasing this policy?"
-Customer: "Yes"
-→ META: close_substage=PROCEED
-→ _apply_close_substage: PURCHASE_INTENT → PROCEED (valid next state)
+Customer: "No insurance at all. And maybe around 20 years support needed."
+extract_profile_fields() → {existing_cover_lakh:0.0, years_of_support:20}
 
-Agent: "Thank you for choosing this plan. I will share the payment and onboarding link with you on your registered email and SMS..."
-→ META: close_substage=CLOSED
-→ Python auto-advances to CLOSED after 1 PROCEED turn
+_auto_advance_stage(): discovery_sufficient() = True
+  plan_type = "term" → memory.stage = "GAP_CALC", turn_in_stage = 0
+```
+
+### Turn 6: GAP_CALC Stage
+```
+_build_messages():
+  stage = GAP_CALC
+  gap = build_gap_calculation(profile)
+    income_lpa = 15, years = 20, liabilities = 30, existing = 0
+    income_protection_lakh = 15 × 20 = 300 lakh (₹3 crore)
+    gap_lakh = 300 + 30 - 0 = 330 lakh (₹3.3 crore)
+  memory.intelligence.gap_lakh = 330
+  gap_block = gap_to_prompt_block(gap) → injected into prompt
+
+LLM → "So your income of ₹15 lakh a year, over 20 years, gives us ₹3 crore just to replace your income.
+Plus your home loan of ₹30 lakh — the protection your family actually needs is around ₹3.3 crore.
+Does that number surprise you?"
+[META stage=POSITION ...]
+
+_auto_advance_stage(): GAP_CALC, turn_in_stage=1 → Python forces to POSITION
+```
+
+### Turn 7: POSITION Stage
+```
+LLM delivers car insurance reframe. Customer agrees term = pure protection.
+_auto_advance_stage(): POSITION, turn_in_stage=1 → Python forces to RECOMMEND
+```
+
+### Turn 8: RECOMMEND Stage
+```
+LLM → "Based on what you've told me — at 32 with your father dependent and a ₹3.3 crore gap —
+I'm recommending Click2Protect Life from HDFC Life. It's a pure term plan, no investment mix,
+and the most efficient way to close that gap at the lowest possible cost."
+[META stage=VARIANTS ...]
+_auto_advance_stage(): RECOMMEND, turn_in_stage=1 → Python forces to VARIANTS
+```
+
+### Turn N: VARIANTS → CLOSE
+```
+LLM recommends Life Option variant, asks about ADB rider.
+Customer agrees: "Yes, let's go with that."
+LLM → "Perfect, let's get that set up for you."
+[META stage=CLOSE close_substage=PROCEED ...]
+
+apply_analysis(): VARIANTS → CLOSE allowed → close_substage set to PROCEED directly
+```
+
+### Turn N+1: PROCEED → CLOSED
+```
+LLM → "Thank you. I'll have the onboarding link sent to you on SMS and email.
+The rest of the process is handled online — it takes just a few minutes.
+Our support team is available if you need any help along the way."
+[META close_substage=CLOSED ...]
+
+_auto_advance_close_substage(): PROCEED, turn_in_stage=2 → Python forces to CLOSED
 ```

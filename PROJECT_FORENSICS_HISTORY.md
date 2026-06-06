@@ -32,16 +32,16 @@ Demonstrate to Sarvam AI that their speech APIs (STT + TTS) can power a deployab
 - **Hard**: No vector databases (ChromaDB, FAISS) — explicitly excluded after evaluation
 - **Hard**: All premium numbers must be deterministic Python — LLM hallucination is prohibited
 - **Soft**: Demo quality (no auth, no persistent DB required for initial version)
-- **Timeline**: Built over approximately one week (2026-05-28 to 2026-06-05)
+- **Timeline**: Built over approximately one week (2026-05-28 to 2026-06-06)
 
 ### Success Criteria (from HANDOFF.md)
 1. Upload HDFC Click2Protect Life PDF → agent introduces itself correctly
-2. Agent collects customer profile naturally (age, smoker, income, family)
-3. Agent develops need (makes customer feel financial vulnerability)
-4. Agent explains plan tied to customer's specific situation
-5. Agent makes a direct personal recommendation
-6. Agent generates a real quote with calculated premium
-7. Agent closes naturally and hands off
+2. Agent collects customer profile naturally (age, income, family, existing cover, years of support)
+3. Agent calculates the customer's protection gap deterministically (gap_engine.py)
+4. Agent positions term insurance before pitching
+5. Agent makes a direct named recommendation (Click2Protect Life from HDFC)
+6. Agent walks through variants and closes assumptively
+7. Agent closes naturally and hands off with onboarding link message
 8. Agent speaks clearly in English, Hindi, or Hinglish depending on the customer
 
 ---
@@ -69,6 +69,8 @@ The baseline had:
 | LLM would personalise if given profile data | LLM acknowledges profile once, then continues generically | Explicit risk narrative mechanism required |
 | Sales brief is a safe knowledge base | Marketing figures in brief hallucinated as customer-specific premiums | Hard architectural change required |
 | is_sufficient() requiring gender/financial_goal | Customers almost never volunteer these | Gate was permanently stuck, stage never advanced |
+| LLM can compute gap on the fly | LLM produces inconsistent numbers; multiplier rules vary | Deterministic gap_engine.py built |
+| 8-stage flow (INTRODUCE → PROFILE → ...) was correct | Too many stages with overlapping intent; consultative flow felt scripted | Replaced with 7-stage consultative model |
 
 ### Alternatives Considered
 
@@ -198,7 +200,7 @@ The baseline had:
 - **Fix**: `_clean()` function strips bracket-contained strings from plan_name before use
 
 ### Commit 25: `5c05c08` — 2026-05-30 — fix: max_tokens 2400→1800 (starter tier cap), add slim-prompt retry
-- **Problem**: Sarvam-m max_tokens exceeded tier cap (this commit references Sarvam-m but was applied to the LLM config generally)
+- **Problem**: Sarvam-m max_tokens exceeded tier cap (applied to LLM config generally)
 - **Fix**: Reduced max_tokens. Slim-prompt retry path if primary fails.
 
 ### Commit 26: `34227ba` — 2026-05-30 — feat: switch LLM sarvam-m → OpenAI GPT-4o-mini
@@ -206,7 +208,7 @@ The baseline had:
 - **Note**: Some LLM calls to OpenAI were already present earlier (for ingestion). This commit standardises all conversation calls.
 
 ### Commit 27: `d954091` — 2026-06-05 — Major overhaul: sales pipeline, UI polish, hallucination fixes, language switching
-- **What**: Largest single commit. Multiple root-cause fixes (Iterations 10-11 in HANDOFF.md terminology).
+- **What**: Largest single commit. Multiple root-cause fixes.
 - **Critical fixes**:
   1. ingestion.py: PREMIUMS brief prompt rewritten — excludes all rupee amounts
   2. agent.py: Runtime strips PREMIUMS section at INTRODUCE/PROFILE/NEED_DEVELOPMENT
@@ -219,11 +221,52 @@ The baseline had:
   9. table_parser.py, structure_builder.py introduced
   10. bm25_store.py introduced (BM25 retrieval replaces keyword bag-of-words)
   11. evaluation.py introduced
-  12. characters.py: Lalita removed, only Arjun remains
-  13. detect_language_from_text() — Unicode script detection for typed input
-  14. normalize_for_tts() called in /speak endpoint (fixes opener TTS)
-  15. Frontend cleanup: lang-badge-sidebar null reference removed
-  16. CLOSE substage redesign: turn_in_stage=0 reset prevents same-turn auto-advance
+  12. detect_language_from_text() — Unicode script detection for typed input
+  13. normalize_for_tts() called in /speak endpoint (fixes opener TTS)
+  14. Frontend cleanup: lang-badge-sidebar null reference removed
+  15. CLOSE substage redesign: turn_in_stage=0 reset prevents same-turn auto-advance
+
+### Commit 28: `e31b3db` — 2026-06-05 — docs: comprehensive handoff document for context transfer
+- **What**: PROJECT_ARCHITECTURE.md, PROJECT_FORENSICS_HISTORY.md, PROJECT_DECISIONS_AND_ROADMAP.md, PROJECT_AGENT_TRACEABILITY.md, PROJECT_CODE_INDEX.md written
+
+### Commit 29: `05dd7cd` — 2026-06-05 — fix: stage-scoped temperature, Python rupee guard, grounding rule, ROP on objection only
+- **What**: First round of consultative redesign fixes
+- **Changes**:
+  1. LLM temperature now stage-scoped (lower for data collection, higher for objection handling)
+  2. Python rupee guard: `_guard_discovery_numbers()` replaces any ₹ amount in DISCOVERY response
+  3. VOICE_RULES Rule 0: GROUNDEDNESS rule added (every rupee amount must have a source)
+  4. ROP (Return of Premium): mentioned ONLY when customer explicitly asks "what if I survive?"
+
+### Commit 30: `02c3117` — 2026-06-05 — fix: stage machine compliance, income gate, GREET double-intro, VARIANTS
+- **What**: Stage machine correctness pass
+- **Changes**:
+  1. GREET: single-turn bridge only (no re-introduction); Python forces DISCOVERY after 1 turn
+  2. DISCOVERY: income-gated — missing_fields_line only asks about income until income is known
+  3. VARIANTS: "Perfect, let's get that set up for you." is the ONLY line on customer agreement
+  4. VARIANTS→CLOSE: Python sets close_substage=PROCEED directly (skips PURCHASE_INTENT)
+  5. RECOMMEND: age guard — do not confuse years_of_support with age in "at X" framing
+
+### Commit 31: `8792f68` — 2026-06-06 — fix: TTS ranges, age-first discovery, rupee guard tightened, Hindi verbosity
+- **What**: Discovery ordering and TTS improvements
+- **Changes**:
+  1. DISCOVERY: age collected first (before income, before family); missing_fields_line updated
+  2. Rupee guard: tightened regex — catches more patterns including "X lakh" and "X crore"
+  3. TTS: "E M I S" (all caps, spaced letters) for EMI plural; "100%" → "one hundred percent"
+  4. Hindi verbosity: VOICE_RULES now explicitly states 2-sentence limit applies to Hindi responses
+  5. gap_engine.py: `_fmt_lakh()` helper added to format lakh values as "₹X crore" / "₹X lakh"
+
+### Commit 32: `a088318` — 2026-06-06 — fix: stage lockup, wrong gap calc, PII collection, premium hallucination
+- **What**: Critical correctness fixes for the full consultative flow
+- **Changes**:
+  1. gap_engine.py: Fixed formula (income_protection_lakh = income_lpa × years, not × 100)
+  2. PROCEED: threshold changed to >= 2 (was 1) — prevents same-turn skip to CLOSED
+  3. CLOSE/CLOSED: blocks QUESTION_ANSWER interrupts from terminal state
+  4. ingestion.py: skips brief/meta regeneration if files already exist
+  5. characters.py: Arjun persona updated to "twenty years of field experience"
+  6. DISCOVERY: 8-turn fallback escape added to prevent infinite DISCOVERY lockup
+  7. profile_extractor.py: added `_extract_years_of_support()` and `_extract_existing_cover()` extractors
+  8. memory.py: discovery_sufficient() updated to require age + income_range + existing_cover_lakh + years_of_support
+  9. gap_engine.py: `build_gap_calculation()` returns None if income unknown; `gap_to_prompt_block()` added
 
 ---
 
@@ -253,7 +296,7 @@ The baseline had:
 **Root cause**: HDFC brief contained "₹22/day for 25-year non-smoker" in PREMIUMS section. Injected into system prompt at every stage including PROFILE. At PROFILE, no calculated numbers block exists. LLM presented brief figure as customer-specific fact.
 **Fix**:
 1. Ingestion prompt rewritten: PREMIUMS section now describes payment structure ONLY, no rupee amounts
-2. Runtime: PREMIUMS section stripped from brief at INTRODUCE/PROFILE/NEED_DEVELOPMENT stages in `_build_messages()`
+2. Runtime: PREMIUMS section stripped from brief at INTRODUCE/PROFILE/NEED_DEVELOPMENT (now GREET/DISCOVERY) stages in `_build_messages()`
 3. HDFC PDF re-ingested with new prompt
 **Files**: `backend/ingestion.py:_generate_brief_via_llm()`, `backend/agent.py:_build_messages()`
 **Lesson**: Any rupee figure in the brief at early stages will be hallucinated as customer-specific. This is architectural, not prompt-fixable.
@@ -261,7 +304,7 @@ The baseline had:
 ### Iteration 5: Profile Gate Never Firing
 **Problem**: `is_sufficient()` required `gender` and `financial_goal` among 4 required fields. Customers almost never volunteer these. Gate never fired. Stage machine stuck at PROFILE indefinitely.
 **Root cause**: Requirements designed from ideal customer, not real customer utterances.
-**Fix**: Simplified to `age + smoker + income_range + (dependents or marital_status)` for term plans.
+**Fix**: Simplified to `age + smoker + income_range + (dependents OR marital_status)` for term plans (old design). Later replaced entirely by consultative redesign (Iteration 13).
 **Files**: `backend/memory.py:CustomerProfile.is_sufficient()`
 
 ### Iteration 6: Ungated PROFILE→PERSONALIZE Exit
@@ -306,6 +349,69 @@ The baseline had:
 **Fix**: Dead reference removed.
 **Files**: `frontend/index.html:updateLangBadge()`
 
+### Iteration 13: 8-Stage Machine Replaced with 7-Stage Consultative Model (Pivot 7)
+**Problem**: The INTRODUCE → PROFILE → PERSONALIZE → NEED_DEVELOPMENT → EXPLAIN → RECOMMENDATION → HANDLE → CLOSE flow had multiple issues:
+  - PERSONALIZE was a vestigial one-turn bridge stage
+  - NEED_DEVELOPMENT was conceptually merged into DISCOVERY in the new design
+  - HANDLE was an interrupt stage that duplicated OBJECTIONS logic
+  - EXPLAIN for term plans should be VARIANTS (variant selection, not topic explanation)
+  - RECOMMENDATION stage intent was vague — no specific product named
+**Root cause**: The original 8-stage design predated the requirement to be highly specific: name the plan, name the gap, name the variant.
+**Fix**: Full redesign to: GREET → DISCOVERY → GAP_CALC → POSITION → RECOMMEND → VARIANTS → CLOSE
+  - GREET: single-turn bridge (no re-intro, just bridge to DISCOVERY)
+  - DISCOVERY: collect 4 gating fields (age, income, existing_cover_lakh, years_of_support)
+  - GAP_CALC: deterministic gap walkthrough from gap_engine.py
+  - POSITION: car-insurance reframe for customers who see term as "wasted money"
+  - RECOMMEND: 3-4 sentences naming Click2Protect Life
+  - VARIANTS: variant selection + rider questions + assumptive close
+  - CLOSE: PURCHASE_INTENT → PROCEED → CLOSED (SUMMARY removed)
+  - OBJECTIONS and QUESTION_ANSWER: interrupt stages, return after 1 turn
+**Files**: `backend/agent.py`, `backend/conversation_analyzer.py`, `backend/memory.py`, `backend/prompts.py`
+
+### Iteration 14: GREET Re-Introduction Bug
+**Problem**: Agent re-introduced itself in GREET stage ("Hi, I'm Arjun from PolicyAI...") even though the opener had already done that.
+**Root cause**: GREET stage intent was written as an introduction stage. The opener already handles introduction.
+**Fix**: GREET stage intent rewritten — agent only acknowledges customer's opener response and bridges to DISCOVERY. GREET is a single-turn stage forced to DISCOVERY by Python.
+**Files**: `backend/prompts.py:STAGE_INTENTS["GREET"]`, `backend/agent.py:_auto_advance_stage()`
+
+### Iteration 15: DISCOVERY Rupee Hallucination
+**Problem**: LLM quoted cover amounts or premiums during DISCOVERY when customer asked "how much cover do I need?"
+**Root cause**: LLM tried to be helpful but had incomplete data; quote amounts were fabricated.
+**Fix**: Two-layer fix:
+  1. `_guard_discovery_numbers(text, profile)` in agent.py — Python post-processes LLM response at DISCOVERY stage; any ₹ match triggers replacement with a redirect to the missing field
+  2. DISCOVERY missing_fields_line includes explicit instruction: "DO NOT give any cover amount, ballpark, or recommendation without income."
+**Files**: `backend/agent.py:_guard_discovery_numbers()`, `backend/agent.py:_build_messages()`
+
+### Iteration 16: DISCOVERY Lockup (8-turn escape)
+**Problem**: If profile_extractor fails to parse all 4 required fields for discovery_sufficient() (age + income_range + existing_cover_lakh + years_of_support), the session gets permanently stuck in DISCOVERY.
+**Root cause**: Customers phrase responses in ways the regex extractors don't match. Without a fallback, DISCOVERY never ends.
+**Fix**: 8-turn fallback escape in `_auto_advance_stage()` — if turn_in_stage >= 8, advance to GAP_CALC (term) or RECOMMEND (savings) regardless.
+**Files**: `backend/agent.py:_auto_advance_stage()`
+
+### Iteration 17: Gap Calculation Formula Error
+**Problem**: Gap calculation was producing wildly incorrect numbers.
+**Root cause**: Formula had `income_protection_lakh = income_lpa * years * 100 / 100` with a comment — the initial version accidentally preserved the division, making it correct, but a refactor removed the comment and fixed what looked like a redundant multiply-divide pair, breaking the formula.
+**Fix**: Correct formula is `income_protection_lakh = income_lpa * years` (income in lakh/year × years = lakh total).
+**Files**: `backend/gap_engine.py:build_gap_calculation()`
+
+### Iteration 18: PROCEED Same-Turn Skip to CLOSED
+**Problem**: When customer agreed in VARIANTS stage, the PROCEED message was delivered but Python immediately advanced to CLOSED in the same turn, so the agent said "Perfect, let's get that set up" and then immediately delivered the CLOSED terminal message in the same response.
+**Root cause**: VARIANTS→CLOSE transition incremented turn_in_stage to 1 in the same Python call. PROCEED threshold was >= 1. So on the first PROCEED turn, Python immediately advanced to CLOSED.
+**Fix**: PROCEED threshold changed to >= 2 in `_auto_advance_close_substage()`. This gives the PROCEED message one full LLM turn before advancing to CLOSED.
+**Files**: `backend/agent.py:_auto_advance_close_substage()`
+
+### Iteration 19: CLOSED Stage Answering Questions
+**Problem**: Customer asked a question after the CLOSED message and the agent answered it, restarting the conversation.
+**Root cause**: QUESTION_ANSWER interrupt was allowed from all stages including CLOSED. CLOSED stage should be truly terminal.
+**Fix**: In `apply_analysis()`, interrupt stages (QUESTION_ANSWER, OBJECTIONS) blocked when `current == "CLOSE" and memory.close_substage == "CLOSED"`.
+**Files**: `backend/conversation_analyzer.py:apply_analysis()`
+
+### Iteration 20: ingestion.py Revert-on-Upload Bug
+**Problem**: Re-uploading a PDF after making manual edits to the brief or metadata caused those edits to be overwritten.
+**Root cause**: ingestion.py regenerated brief and metadata on every upload, even if the files existed.
+**Fix**: Added skip logic — if `{name}.brief.txt` and `{name}.meta.json` already exist, skip regeneration.
+**Files**: `backend/ingestion.py:ingest()`
+
 ---
 
 ## E. FEATURE DEVELOPMENT HISTORY
@@ -319,6 +425,7 @@ The baseline had:
 - v4: Deterministic premium table extraction via table_parser.py
 - v5: structure_builder.py — builds structure.json with quote capability level
 - v6: BM25 indexing via bm25_store.py — section-aware chunks
+- v7: Skip-if-exists logic to prevent revert on re-upload
 **Current**: 5 output files per PDF. Full pipeline 10-15 seconds for typical brochure.
 
 ### Feature: Stage Machine
@@ -333,6 +440,7 @@ The baseline had:
 - v7: HANDLE and QUESTION_ANSWER stages (objection and Q&A handling)
 - v8: CLOSE substage machine — PURCHASE_INTENT→PROCEED/FEEDBACK→CLOSED
 - v9: PROFILE→PERSONALIZE gate; missing_fields_line injection
+- v10 (Pivot 7): Complete redesign to GREET→DISCOVERY→GAP_CALC→POSITION→RECOMMEND→VARIANTS→CLOSE; discovery_sufficient() gates on 4 fields; interrupt stages (OBJECTIONS, QUESTION_ANSWER) return after 1 turn; GREET is single-turn only
 
 ### Feature: Customer Profiling
 **Why introduced**: Personalisation requires knowing the customer.
@@ -341,17 +449,30 @@ The baseline had:
 - v2: CustomerProfile dataclass with 5 fields
 - v3: profile_extractor.py — deterministic regex extraction before every LLM call
 - v4: 10 profile fields (added policy_term, payment_frequency, liabilities_lakh, cover_amount_override_lakh)
+- v5: 12 profile fields (added years_of_support, existing_cover_lakh — both gate discovery_sufficient)
+- v6: discovery_sufficient() redesigned — 4 hard gates: age + income_range + existing_cover_lakh + years_of_support
+  - existing_cover_lakh = 0.0 means "no insurance" explicitly answered
+  - None means not asked yet (blocks gate)
+
+### Feature: Gap Engine (NEW)
+**Why introduced**: LLM computed gap inconsistently. "10x income" rule was being applied wrong. No transparency to customer on how the gap was calculated.
+**Implementation**: `gap_engine.py` — deterministic Python:
+  - `build_gap_calculation(profile)` → dict with income_lpa, years_of_support, income_protection_lakh, liabilities_lakh, existing_cover_lakh, gap_lakh, gap_display, spoken_walkthrough, assumptions_made
+  - `gap_to_prompt_block(gap)` → ready-to-inject prompt block at GAP_CALC stage
+  - Formula: gap_lakh = income_lpa × years_of_support + liabilities_lakh − existing_cover_lakh
+  - Defaults: 20 years, 0 liabilities, 0 existing cover if not collected
+  - Stores computed gap_lakh in `memory.intelligence.gap_lakh` for use in later stages
 
 ### Feature: Risk Narrative
 **Why introduced**: LLM personalises generically. Need to force specific vulnerability framing.
-**How**: `build_risk_narrative()` — pure deterministic Python, converts profile fields into a 5-6 sentence financial vulnerability story. Injected into system prompt at NEED_DEVELOPMENT, EXPLAIN, RECOMMENDATION, CLOSE, HANDLE.
+**How**: `build_risk_narrative()` — pure deterministic Python, converts profile fields into a 5-6 sentence financial vulnerability story. Injected into system prompt at RECOMMEND, VARIANTS, EXPLAIN, CLOSE, OBJECTIONS.
 **Why deterministic**: LLM-generated narratives varied and sometimes inaccurate. Deterministic = auditable, consistent.
 
 ### Feature: Quote Engine
 **Why introduced**: LLM hallucinated premiums. Insurance customers trust numbers or don't buy.
 **Two-tier design**:
-1. `recommendation.py` — industry benchmark estimates (income × multiplier, actuarial constants). Injected at EXPLAIN/RECOMMENDATION/CLOSE.
-2. `quote_engine.py` — document-derived from structure.json. Interpolates premium tables, applies GST 18%, all 4 frequency breakdowns. Injected at RECOMMENDATION/CLOSE only.
+1. `recommendation.py` — industry benchmark estimates (income × multiplier, actuarial constants). Injected at RECOMMEND/VARIANTS/EXPLAIN/CLOSE.
+2. `quote_engine.py` — document-derived from structure.json. Interpolates premium tables, applies GST 18%, all 4 frequency breakdowns. Injected at CLOSE only.
 **Critical**: If smoker=None, premium estimate is suppressed entirely. Never assumes non-smoker.
 
 ### Feature: BM25 Retrieval
@@ -362,8 +483,8 @@ The baseline had:
 ### Feature: Character Registry
 **Why introduced**: Sales persona must be consistent — not just prompt text but emotional handling.
 **Characters**:
-- `arjun` — high-performing male advisor, 30s, energetic and consultative, `dev` voice
-- `lalita` — patient female advisor, 40s, empathetic and trust-building, `ritu` voice (removed from UI in latest iteration, only Arjun shown)
+- `arjun` — high-performing male advisor, 30s, energetic and consultative, `dev` voice; persona updated to "twenty years of field experience"
+- `lalita` — patient female advisor, 40s, empathetic and trust-building, `ritu` voice (defined but inactive in UI)
 **Each character has**: identity, persona, style_guide, emotional_guide, voice
 
 ---
@@ -383,7 +504,7 @@ The baseline had:
 - **Purpose**: All LLM work — conversation, metadata extraction, brief generation, post-conversation evaluation
 - **Model ID**: `gpt-4o-mini`
 - **Configuration**:
-  - Conversation: temperature=0.7, max_tokens=600
+  - Conversation: stage-scoped temperature (lower at GREET/DISCOVERY, higher at VARIANTS/OBJECTIONS); max_tokens=600
   - Metadata extraction: temperature=0.1, max_tokens=200
   - Brief generation: temperature=0.3, max_tokens=900
   - Premium table extraction: temperature=0.0, max_tokens=400
@@ -410,9 +531,11 @@ The baseline had:
 - **Output codec**: WAV
 - **Hard character limit**: 400 chars per call (bulbul:v3 rejects longer inputs)
 - **Pre-processing**: `enable_preprocessing=True` — normalises text for speech
-- **Text normalisation**: `normalize_for_tts()` called before every TTS call — converts ₹ amounts, LPA, percentages, age patterns, product names
+- **Text normalisation**: `normalize_for_tts()` called before every TTS call
+  - "EMIs" → "E M I S" (spaced capital letters)
+  - "100%" → "one hundred percent"
+  - ₹ amounts, LPA, product names
 - **Constraint**: Required (Sarvam AI demo requirement)
-- **Note from earlier memory**: Speaker names `ritu`, `priya`, `kavitha`, `gokul` (others → BadRequestError) — current code uses `dev` and `anushka` as defaults, suggesting this was updated
 
 ---
 
@@ -448,7 +571,7 @@ The baseline had:
 ### BUG-03: INTRODUCE stage infinite loop
 - **Symptom**: Agent kept asking "Shall I ask some questions?" indefinitely
 - **Root cause**: No Python escape from INTRODUCE; LLM had no mechanism to advance
-- **Fix**: turn_in_stage >= 2 → force to PROFILE
+- **Fix**: turn_in_stage >= 2 → force to PROFILE (now replaced by GREET single-turn advance)
 
 ### BUG-04: Premium hallucination at PROFILE stage (Critical)
 - **Symptom**: Agent said "₹22/day" to customer during profile collection
@@ -490,6 +613,45 @@ The baseline had:
 - **Root cause**: LLM's strong insurance-application prior overrode prompt
 - **Fix**: Explicit forbidden list in PROCEED substage prompt
 
+### BUG-12: GREET re-introducing agent
+- **Symptom**: After opener played, GREET stage LLM response said "Hi, I'm Arjun from PolicyAI" again
+- **Root cause**: GREET stage intent was written as if GREET was the opener
+- **Fix**: GREET intent rewritten to acknowledge and bridge only; Python forces DISCOVERY after 1 turn
+
+### BUG-13: DISCOVERY rupee hallucination
+- **Symptom**: Agent quoted cover amounts ("you'll need about ₹1 crore") when customer asked during DISCOVERY
+- **Root cause**: LLM tried to answer helpfully without data
+- **Fix**: `_guard_discovery_numbers()` Python post-processor + income-gated missing_fields_line
+
+### BUG-14: DISCOVERY infinite lockup
+- **Symptom**: Session stuck in DISCOVERY permanently when customer's phrasing didn't match extractors
+- **Root cause**: discovery_sufficient() required 4 fields; regex extractors missed some phrasings
+- **Fix**: 8-turn fallback escape added to _auto_advance_stage()
+
+### BUG-15: Gap calculation formula error
+- **Symptom**: Gap amounts were either 100x too large or 100x too small
+- **Root cause**: Residual `* 100 / 100` in formula was removed without understanding intent
+- **Fix**: Correct formula confirmed as `income_protection_lakh = income_lpa * years`
+
+### BUG-16: PROCEED same-turn skip to CLOSED
+- **Symptom**: Agent said PROCEED message and CLOSED message in same response
+- **Root cause**: VARIANTS→CLOSE transition set turn_in_stage=1; PROCEED threshold was >=1
+- **Fix**: PROCEED threshold changed to >= 2
+
+### BUG-17: CLOSED state answers questions
+- **Symptom**: After closing, customer could ask a question and agent would re-engage
+- **Root cause**: QUESTION_ANSWER interrupts were allowed from all stages
+- **Fix**: Interrupt blocked when close_substage == "CLOSED"
+
+### BUG-18: Brief overwritten on re-upload
+- **Symptom**: Manual edits to brief.txt lost on PDF re-upload
+- **Root cause**: ingestion.py regenerated files unconditionally
+- **Fix**: Skip-if-exists logic added
+
+### BUG-19: Arjun age claim mismatch
+- **Symptom**: Arjun persona said "eight years of experience" but was framed as "early 30s" — implied starting at 22, plausible but inconsistent with the assertiveness expected of a top closer
+- **Fix**: Updated to "twenty years of field experience"
+
 ---
 
 ## I. FAILED EXPERIMENTS
@@ -528,7 +690,13 @@ The baseline had:
 - **Attempted**: Simple 4-stage arc
 - **Why tried**: Minimal viable structure
 - **Why failed**: Too coarse. No need development. No personalisation hooks. Agent felt like FAQ bot.
-- **Learned**: Insurance sales requires at minimum: intro, profiling, need development, explanation, recommendation, close. Collapsing these loses the consultative quality.
+- **Learned**: Insurance sales requires at minimum: intro, profiling/discovery, gap calculation, positioning, recommendation, variant selection, close.
+
+### Failed: LLM-computed gap on the fly
+- **Attempted**: Ask LLM to compute "10x income" or "15x income" gap in system prompt instructions
+- **Why tried**: Seemed simple — LLM can do basic arithmetic
+- **Why failed**: LLM applied the multiplier inconsistently; sometimes used 10x, sometimes 15x; sometimes confused years_of_support with the multiplier; no transparency to customer on methodology
+- **Learned**: Any calculation that needs to be communicated to the customer should be deterministic Python, not LLM arithmetic
 
 ---
 
@@ -538,7 +706,7 @@ The baseline had:
 - **Trigger**: Immediate API failure
 - **Impact**: All LLM calls now go to OpenAI. Sarvam APIs remain for STT/TTS only.
 
-### Pivot 2: Generic stages → Consultative sales stages
+### Pivot 2: Generic stages → Consultative sales stages (first iteration)
 - **Trigger**: Agent felt robotic and scripted in early testing
 - **From**: GREETING → DISCOVERY → PITCH → CLOSE
 - **To**: INTRODUCE → PROFILE → NEED_DEVELOPMENT → EXPLAIN → RECOMMENDATION → CLOSE
@@ -551,20 +719,39 @@ The baseline had:
 ### Pivot 4: Instruction-based hallucination prevention → structural data removal
 - **Trigger**: Premium hallucination bug; prompt-based prohibition failed
 - **From**: "Do not quote premiums at PROFILE stage" instruction
-- **To**: Runtime strip of PREMIUMS section from brief at INTRODUCE/PROFILE/NEED_DEVELOPMENT
+- **To**: Runtime strip of PREMIUMS section from brief at early stages
 - **Impact**: Permanently architectural. No rupee amounts possible at early stages.
 
 ### Pivot 5: LLM-only profile extraction → deterministic regex + LLM
 - **Trigger**: LLM sometimes missed explicit profile statements; profile gate never fired
 - **From**: LLM-implicit profile understanding
 - **To**: profile_extractor.py runs deterministic regex on every user message BEFORE LLM call
-- **Impact**: Profile fields collected reliably. is_sufficient() can now fire correctly.
+- **Impact**: Profile fields collected reliably. discovery_sufficient() can now fire correctly.
 
 ### Pivot 6: Free-form LLM stage control → Python-gated stage machine
 - **Trigger**: LLM stuck in stages, skipping stages, not advancing
 - **From**: Stage transitions entirely LLM-controlled via META tags
 - **To**: LLM signals transitions; Python enforces via _auto_advance_stage() + conversation_analyzer.py gates
 - **Impact**: Predictable stage progression. Python escape hatches prevent permanent stucks.
+
+### Pivot 7: 8-stage model (INTRODUCE→HANDLE) → 7-stage consultative model (GREET→VARIANTS) (Major Redesign)
+- **Trigger**: Multiple issues with old 8-stage design; agent wasn't naming the product, wasn't calculating the gap, wasn't doing assumptive close
+- **From**: INTRODUCE → PROFILE → PERSONALIZE → NEED_DEVELOPMENT → EXPLAIN → RECOMMENDATION → HANDLE → CLOSE
+- **To**: GREET → DISCOVERY → GAP_CALC → POSITION → RECOMMEND → VARIANTS → CLOSE (term); GREET → DISCOVERY → RECOMMEND → EXPLAIN → CLOSE (savings); OBJECTIONS / QUESTION_ANSWER as interrupt stages
+- **Key changes**:
+  - GREET: 1-turn bridge only (no re-intro)
+  - DISCOVERY: 4-field gate (age + income + existing_cover_lakh + years_of_support); income-gated priority; 8-turn escape
+  - GAP_CALC: entirely new — deterministic gap walkthrough via gap_engine.py
+  - POSITION: car-insurance reframe; skippable with position_skip=true
+  - RECOMMEND: 3-4 sentences naming specific product
+  - VARIANTS: replaces EXPLAIN for term plans; assumptive close built in; PURCHASE_INTENT skipped on agreement
+  - CLOSE: SUMMARY removed; starts at PURCHASE_INTENT; PROCEED threshold >= 2; CLOSED blocks interrupts
+  - discovery_sufficient(): redesigned with 4 hard gates
+  - profile_extractor.py: 2 new extractors (years_of_support, existing_cover_lakh)
+  - gap_engine.py: entirely new file
+  - memory.py: 3 new CustomerProfile fields (existing_cover_lakh, years_of_support, chosen_variant)
+  - conversation_analyzer.py: _LLM_ALLOWED_TRANSITIONS rewritten for new stage set; position_skip field added
+- **Impact**: Complete rewrite of the sales flow. Old sessions on old code would follow legacy stage handling via compatibility shim.
 
 ---
 
@@ -587,6 +774,7 @@ The baseline had:
 - **All 5 output files generated once** at upload time, not per conversation turn
 - **Brief generation**: One LLM call at ingestion. All subsequent turns use pre-generated brief.
 - **BM25 index**: Built once, saved to JSON, loaded on session start. No per-query reindexing.
+- **Skip-if-exists**: Re-uploading same PDF does not regenerate existing brief/metadata files.
 
 ---
 
@@ -606,11 +794,13 @@ The baseline had:
 ### LLM Guardrails
 - **Hallucination prevention (structural)**:
   - Brief PREMIUMS section never contains rupee amounts
-  - PREMIUMS stripped from brief at early stages
-  - Calculated numbers block is the only source of financial figures
+  - PREMIUMS stripped from brief at early stages (GREET/DISCOVERY)
+  - Calculated numbers block and gap_engine.py block are the only sources of financial figures
+  - `_guard_discovery_numbers()` Python post-processor hard-blocks ₹ amounts at DISCOVERY
 - **Hallucination prevention (prompt)**:
+  - RULE 0 — GROUNDEDNESS: every rupee amount must exist in PRODUCT KNOWLEDGE, CALCULATED NUMBERS, or GAP CALCULATION block
   - VOICE_RULES: "HALLUCINATION IS FORBIDDEN" with exact fallback phrase
-  - ADVISOR_RULES: "Numbers must come from document or CALCULATED NUMBERS block only"
+  - ADVISOR_RULES: "Numbers must come from the document or CALCULATED NUMBERS block only"
 - **CLOSE/PROCEED forbidden list**: Prevents agent from collecting personal data or inventing application steps
 - **Objection playbook**: Prevents agent from citing competitors not in document
 
@@ -626,35 +816,39 @@ The baseline had:
 
 ---
 
-## M. CURRENT STATE (as of 2026-06-05, commit `d954091`)
+## M. CURRENT STATE (as of 2026-06-06, commit `a088318`)
 
 ### What Exists and Works
-- PDF upload → full ingestion pipeline (5 output files in ~10-15s)
+- PDF upload → full ingestion pipeline (5 output files in ~10-15s); skip-if-exists prevents revert
 - Session creation and in-memory management
 - Voice pipeline: mic → STT → WebSocket → LLM stream → parallel TTS → merged WAV → playback
 - Text pipeline: type → WebSocket → LLM stream → parallel TTS → merged WAV → playback
-- TTS text normalisation (₹ amounts, LPA, percentages, age patterns, product names)
+- TTS text normalisation (₹ amounts, LPA, percentages, EMIs, age patterns, product names)
 - Language detection from voice (STT) and typed text (Unicode script detection)
-- Deterministic profile extraction (10 fields via regex)
-- Customer profiling with CustomerIntelligence scoring (interest, close_readiness, lead_score)
-- Stage machine with Python gates (9 stages, 5 CLOSE substages)
+- Per-turn ⚠️ LANGUAGE THIS TURN reminder in system prompt
+- Deterministic profile extraction (12 fields via regex including years_of_support, existing_cover_lakh)
+- Customer profiling with CustomerIntelligence scoring (interest, close_readiness, gap_lakh, lead_score)
+- Stage machine with Python gates: GREET→DISCOVERY→GAP_CALC→POSITION→RECOMMEND→VARIANTS→CLOSE (term)
+- 8-turn DISCOVERY fallback escape; GREET forced after 1 turn; income-gated DISCOVERY priority
+- Deterministic gap calculation (gap_engine.py); gap_lakh stored in memory.intelligence
+- Rupee guard in DISCOVERY (_guard_discovery_numbers)
 - Risk narrative generation (deterministic, no LLM)
 - Cover recommendation engine (deterministic, actuarial constants)
 - Quote engine (document-derived premium tables with interpolation, GST, 4 frequencies)
 - BM25 retrieval (section-aware chunks, rank-bm25 library)
+- CLOSE substage machine: PURCHASE_INTENT → PROCEED (2 turns) → CLOSED; FEEDBACK path
+- CLOSED blocks QUESTION_ANSWER/OBJECTIONS interrupts
 - Post-conversation evaluation (LLM-generated coaching report)
 - Session transcript endpoint
 - Frontend: PolicyAI brand, sidebar, voice/text mode toggle, profile chips, evaluation modal, transcript modal
 
 ### What Is Partially Working
-- **Quote engine**: Works but HDFC has `quote_capability_level=1` (illustrative rows, confidence=inferred, not real table data)
-- **NEED_DEVELOPMENT stage**: Architecturally complete. Not verified in live conversation post Iteration 11.
-- **RECOMMENDATION stage**: Same status as above.
+- **Quote engine**: Works but HDFC has `quote_capability_level=1` (illustrative rows, not real table data)
 - **Language switching**: Typed Indian scripts → correct language. Voice: first response after switch sometimes still English.
-- **Objection handling**: HANDLE stage intent written; not live-verified.
+- **POSITION skip**: position_skip=true META field implemented; not extensively tested
 
 ### Known Issues
-- HDFC `plan_type` detected as "other" instead of "term" — affects is_sufficient() and explain topics
+- HDFC `plan_type` detected as "other" instead of "term" — affects discovery flow and explain topics
 - HDFC eligibility brief shows "70-85 years" (GPT extraction error; actual is 18-70 years)
 - Smoker/non-smoker premium table split detected but not implemented (all rows tagged as non-smoker)
 - Language consistency: LLM may respond in English after voice language switch
@@ -662,11 +856,12 @@ The baseline had:
 - No human document approval workflow (AUTO_APPROVE_DOCUMENTS=true always)
 - No voice activity detection (VAD) — user must press button to start/stop recording
 - recommendation_block and policy_quote both injected at CLOSE (two premium sources)
+- Arjun "twenty years of field experience" with "early 30s" is implausible — intentional creative choice
 
 ### Technical Debt
-- PERSONALIZE stage is vestigial (one-turn bridge to NEED_DEVELOPMENT). Could be removed.
-- SUMMARY close substage exists but is skipped in Python (RECOMMENDATION serves that purpose). Dead code.
-- `ingest_worker.py` (35 lines) — thin CLI wrapper around ingestion.py. Relationship to production code unclear.
+- Old stage names (INTRODUCE, PROFILE, PERSONALIZE, NEED_DEVELOPMENT, RECOMMENDATION, HANDLE) still referenced in STAGE_INTENTS dict as stub entries for backward compatibility
+- SUMMARY close substage intent exists in prompts.py but the close_substage never starts there — close_substage initial value is PURCHASE_INTENT
+- `ingest_worker.py` (orphaned) — not used in current flow
 - `regen_briefs.py` — utility to regenerate briefs for existing PDFs. Not integrated into any workflow.
 - `run_tests.py` and `direct_test.py` — legacy test scripts, not a test suite.
 - `max-life-stpp-axis-documents` in data/ has no `.chunks.json` or `.structure.json` — BM25/quote not available for this PDF.
@@ -676,7 +871,7 @@ The baseline had:
 - No database — audit trail only in `logs/turns.jsonl` and `logs/sessions.jsonl` (JSONL files)
 - No authentication, no multi-tenancy
 - No CI/CD, no Docker, no deployment infrastructure
-- Frontend is a single 1344-line HTML file (CSS, HTML, JS all in one file)
+- Frontend is a single HTML file (CSS, HTML, JS all in one file)
 
 ### Future Risks
 - gpt-4o-mini model deprecation (OpenAI frequently deprecates minor versions)
